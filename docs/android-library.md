@@ -1,4 +1,4 @@
-# Android Library Guide (`oneproimu`)
+# Android Library Guide (`oneproxr`)
 
 This guide is for Android developers who want live XREAL One Pro head tracking without the Unity-based XREAL SDK
 
@@ -31,26 +31,26 @@ For most users, source-module integration is the fastest path
 
 ### Source module (recommended)
 
-Pull `oneproimu/` into your project and wire it as a local module
+Pull `oneproxr/` into your project and wire it as a local module
 
 `settings.gradle.kts`:
 
 ```kotlin
-include(":app", ":oneproimu")
+include(":app", ":oneproxr")
 ```
 
 `app/build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation(project(":oneproimu"))
+    implementation(project(":oneproxr"))
 }
 ```
 
 ### Optional: Maven artifact
 
 If you want package-based integration, this repo also publishes
-`io.onepro:oneproimu` to GitHub Packages
+`io.onepro:oneproxr` to GitHub Packages
 
 1. Add credentials to `~/.gradle/gradle.properties`
 
@@ -82,7 +82,7 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    implementation("io.onepro:oneproimu:<version>")
+    implementation("io.onepro:oneproxr:<version>")
 }
 ```
 
@@ -102,7 +102,7 @@ The library manifest is intentionally empty, so the host app must declare requir
 </manifest>
 ```
 
-`ACCESS_NETWORK_STATE` is required because `OneProImuClient` selects the right `Network.socketFactory` for link-local routing
+`ACCESS_NETWORK_STATE` is required because `OneProXrClient` selects the right `Network.socketFactory` for link-local routing
 
 ## Quickstart integration
 
@@ -115,28 +115,28 @@ import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import io.onepro.imu.HeadTrackingControlChannel
-import io.onepro.imu.HeadTrackingStreamConfig
-import io.onepro.imu.HeadTrackingStreamEvent
-import io.onepro.imu.OneProImuClient
-import io.onepro.imu.OneProImuEndpoint
+import io.onepro.xr.HeadTrackingControlChannel
+import io.onepro.xr.HeadTrackingStreamConfig
+import io.onepro.xr.HeadTrackingStreamEvent
+import io.onepro.xr.OneProXrClient
+import io.onepro.xr.OneProXrEndpoint
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class TrackingActivity : AppCompatActivity() {
-    private val endpoint = OneProImuEndpoint(
+    private val endpoint = OneProXrEndpoint(
         host = "169.254.2.1",
         controlPort = 52999,
-        imuPort = 52998
+        streamPort = 52998
     )
     private val controlChannel = HeadTrackingControlChannel()
-    private lateinit var client: OneProImuClient
+    private lateinit var client: OneProXrClient
     private var streamJob: Job? = null
     private var calibrationComplete = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        client = OneProImuClient(applicationContext, endpoint)
+        client = OneProXrClient(applicationContext, endpoint)
     }
 
     @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
@@ -208,11 +208,11 @@ If users call `Zero View` before calibration is complete, your app should ignore
 
 ## API guide
 
-### `OneProImuClient`
+### `OneProXrClient`
 
 - `describeRouting()`: inspects active interfaces and Android network candidates
 - `connectControlChannel()`: quick control-socket connectivity check
-- `readImuFrames()`: short raw frame read helper for diagnostics
+- `readSensorFrames()`: short raw frame read helper for diagnostics
 - `streamHeadTracking(config)`: primary streaming API for production use
 
 `streamHeadTracking` is a cold flow. Every collection starts a new socket session

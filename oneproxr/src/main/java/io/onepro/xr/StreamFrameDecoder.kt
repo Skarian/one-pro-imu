@@ -1,12 +1,12 @@
-package io.onepro.imu
+package io.onepro.xr
 
 import kotlin.math.round
 
-object ImuFrameDecoder {
+object StreamFrameDecoder {
     private const val TEMPERATURE_SCALE = 0.007548309
     private const val TEMPERATURE_OFFSET = 25.0
 
-    fun decode(index: Int, payload: ByteArray, captureMonotonicNanos: Long? = null): DecodedImuFrame {
+    fun decode(index: Int, payload: ByteArray, captureMonotonicNanos: Long? = null): DecodedSensorFrame {
         val reportId = u8(payload, 0)
         val version = u8(payload, 1)
         val temperatureRaw = u16le(payload, 2)
@@ -21,7 +21,7 @@ object ImuFrameDecoder {
         val gyroZ = s24le(payload, 24)
         val tailWord = u16le(payload, 30)
 
-        return DecodedImuFrame(
+        return DecodedSensorFrame(
             index = index,
             byteCount = payload.size,
             captureMonotonicNanos = captureMonotonicNanos,

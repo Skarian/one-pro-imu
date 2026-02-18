@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "io.onepro.imuprobe"
+    namespace = "io.onepro.xrprobe"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "io.onepro.imuprobe"
+        applicationId = "io.onepro.xrprobe"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -45,5 +45,5 @@ dependencies {
     implementation("com.google.android.material:material:1.13.0")
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-    implementation(project(":oneproimu"))
+    implementation(project(":oneproxr"))
 }

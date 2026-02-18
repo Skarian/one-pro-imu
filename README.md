@@ -1,24 +1,24 @@
 # one-pro-imu
 
-I built this repo to make accessing XREAL One Pro IMU data on Android without
+I built this repo to make accessing XREAL One Pro tracking data on Android without
 depending on the heavy Unity-based XREAL SDK
 
 The repo includes:
 
-1. An Android library other Android developers can use to read IMU data
+1. An Android library other Android developers can use to read tracking sensor data
    and build their own apps
 2. A demo Android app that showcases the library's functionality
 
 ## Start here
 
 - Android library integration guide: [`docs/android-library.md`](docs/android-library.md)
-- Demo app integration example: `app/src/main/java/io/onepro/imuprobe/MainActivity.kt`
+- Demo app integration example: `app/src/main/java/io/onepro/xrprobe/MainActivity.kt`
 - Latest demo APK download: [`Releases`](../../releases)
 
 ## Repo Structure
 
-- `oneproimu/`: Android library module (`io.onepro.imu`)
-- `app/`: Android demo app (`io.onepro.imuprobe`)
+- `oneproxr/`: Android library module (`io.onepro.xr`)
+- `app/`: Android demo app (`io.onepro.xrprobe`)
 - `references/`: inspiration and compatibility assets based on
   [`One-Pro-IMU-Retriever-Demo`](https://github.com/SamiMitwalli/One-Pro-IMU-Retriever-Demo)
   and [`xreal_one_driver`](https://github.com/rohitsangwan01/xreal_one_driver)
@@ -28,13 +28,13 @@ The repo includes:
 
 Entry point:
 
-- `io.onepro.imu.OneProImuClient`
+- `io.onepro.xr.OneProXrClient`
 
 Helpful methods:
 
 - `describeRouting()`
 - `connectControlChannel()`
-- `readImuFrames()`
+- `readSensorFrames()`
 - `streamHeadTracking(config)`
 
 For event semantics, lifecycle guidance, and troubleshooting, use
@@ -45,9 +45,9 @@ For event semantics, lifecycle guidance, and troubleshooting, use
 From repo root:
 
 ```bash
-./gradlew :oneproimu:testDebugUnitTest :oneproimu:lintDebug :app:assembleDebug :app:lintDebug
+./gradlew :oneproxr:testDebugUnitTest :oneproxr:lintDebug :app:assembleDebug :app:lintDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell am start -n io.onepro.imuprobe/.MainActivity
+adb shell am start -n io.onepro.xrprobe/.MainActivity
 ```
 
 ## Demo App Quick Start

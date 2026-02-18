@@ -1,16 +1,16 @@
-package io.onepro.imuprobe
+package io.onepro.xrprobe
 
 import android.os.Bundle
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
-import io.onepro.imuprobe.databinding.ActivityMainBinding
-import io.onepro.imu.HeadTrackingControlChannel
-import io.onepro.imu.HeadTrackingSample
-import io.onepro.imu.HeadTrackingStreamConfig
-import io.onepro.imu.HeadTrackingStreamDiagnostics
-import io.onepro.imu.HeadTrackingStreamEvent
-import io.onepro.imu.OneProImuEndpoint
-import io.onepro.imu.OneProImuClient
+import io.onepro.xrprobe.databinding.ActivityMainBinding
+import io.onepro.xr.HeadTrackingControlChannel
+import io.onepro.xr.HeadTrackingSample
+import io.onepro.xr.HeadTrackingStreamConfig
+import io.onepro.xr.HeadTrackingStreamDiagnostics
+import io.onepro.xr.HeadTrackingStreamEvent
+import io.onepro.xr.OneProXrEndpoint
+import io.onepro.xr.OneProXrClient
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -83,7 +83,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val endpoint = buildEndpoint(host, ports)
-        val client = OneProImuClient(applicationContext, endpoint)
+        val client = OneProXrClient(applicationContext, endpoint)
         val control = HeadTrackingControlChannel()
         controlChannel = control
 
@@ -98,7 +98,7 @@ class MainActivity : AppCompatActivity() {
         setRunningState(true)
 
         appendLog(
-            "=== test start ${nowIso()} host=${endpoint.host} control=${endpoint.controlPort} imu=${endpoint.imuPort} sensitivity=${formatSensitivity()} ==="
+            "=== test start ${nowIso()} host=${endpoint.host} control=${endpoint.controlPort} stream=${endpoint.streamPort} sensitivity=${formatSensitivity()} ==="
         )
 
         testJob = uiScope.launch {
@@ -290,7 +290,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun formatDiagnostics(diagnostics: HeadTrackingStreamDiagnostics): String {
-        return "diag samples=${diagnostics.trackingSampleCount} parsed=${diagnostics.parsedMessageCount} rejected=${diagnostics.rejectedMessageCount} dropped=${diagnostics.droppedByteCount} hz=${diagnostics.observedSampleRateHz.toDisplay()} rxMs[min=${diagnostics.receiveDeltaMinMs.toDisplay()},avg=${diagnostics.receiveDeltaAvgMs.toDisplay()},max=${diagnostics.receiveDeltaMaxMs.toDisplay()}] rejectBreakdown[short=${diagnostics.tooShortMessageCount},marker=${diagnostics.missingSensorMarkerCount},slice=${diagnostics.invalidImuSliceCount},float=${diagnostics.floatDecodeFailureCount}]"
+        return "diag samples=${diagnostics.trackingSampleCount} parsed=${diagnostics.parsedMessageCount} rejected=${diagnostics.rejectedMessageCount} dropped=${diagnostics.droppedByteCount} hz=${diagnostics.observedSampleRateHz.toDisplay()} rxMs[min=${diagnostics.receiveDeltaMinMs.toDisplay()},avg=${diagnostics.receiveDeltaAvgMs.toDisplay()},max=${diagnostics.receiveDeltaMaxMs.toDisplay()}] rejectBreakdown[short=${diagnostics.tooShortMessageCount},marker=${diagnostics.missingSensorMarkerCount},slice=${diagnostics.invalidSensorSliceCount},float=${diagnostics.floatDecodeFailureCount}]"
     }
 
     private fun setLogsVisible(visible: Boolean) {
@@ -311,13 +311,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildEndpoint(host: String, ports: List<Int>): OneProImuEndpoint {
+    private fun buildEndpoint(host: String, ports: List<Int>): OneProXrEndpoint {
         val controlPort = ports.getOrNull(0) ?: 52999
-        val imuPort = ports.getOrNull(1) ?: if (controlPort == 52999) 52998 else 52999
-        return OneProImuEndpoint(
+        val streamPort = ports.getOrNull(1) ?: if (controlPort == 52999) 52998 else 52999
+        return OneProXrEndpoint(
             host = host,
             controlPort = controlPort,
-            imuPort = imuPort
+            streamPort = streamPort
         )
     }
 

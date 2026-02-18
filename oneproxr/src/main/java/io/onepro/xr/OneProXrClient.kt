@@ -1,4 +1,4 @@
-package io.onepro.imu
+package io.onepro.xr
 
 import android.Manifest
 import android.content.Context
@@ -23,9 +23,9 @@ import kotlinx.coroutines.withContext
  * Host apps must declare `INTERNET` and `ACCESS_NETWORK_STATE` in their app manifest.
  * The library manifest is intentionally empty, so permissions are explicit in the consumer app.
  */
-class OneProImuClient(
+class OneProXrClient(
     private val context: Context,
-    private val endpoint: OneProImuEndpoint = OneProImuEndpoint()
+    private val endpoint: OneProXrEndpoint = OneProXrEndpoint()
 ) {
     private data class NetworkCandidate(
         val network: Network,
@@ -117,22 +117,22 @@ class OneProImuClient(
     }
 
     /**
-     * Reads a bounded number of IMU frames and returns decoded frame metadata plus rate estimates
+     * Reads a bounded number of stream frames and returns decoded frame metadata plus rate estimates
      *
      * Use this for diagnostics or parser validation.
      * For production tracking, use [streamHeadTracking].
      */
     @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
-    suspend fun readImuFrames(
+    suspend fun readSensorFrames(
         frameCount: Int = 4,
         frameSizeBytes: Int = 32,
         connectTimeoutMs: Int = 1500,
         readTimeoutMs: Int = 700,
         maxReadBytes: Int = 256,
         syncMarker: ByteArray = byteArrayOf(0x28, 0x36)
-    ): ImuReadResult = withContext(Dispatchers.IO) {
+    ): StreamReadResult = withContext(Dispatchers.IO) {
         if (frameSizeBytes <= 0) {
-            return@withContext ImuReadResult(
+            return@withContext StreamReadResult(
                 success = false,
                 networkHandle = null,
                 interfaceName = null,
@@ -148,7 +148,7 @@ class OneProImuClient(
         val candidates = networkCandidatesForHost(endpoint.host)
         val selected = preferredNetwork(endpoint.host, candidates)
         if (selected == null) {
-            return@withContext ImuReadResult(
+            return@withContext StreamReadResult(
                 success = false,
                 networkHandle = null,
                 interfaceName = null,
@@ -166,11 +166,11 @@ class OneProImuClient(
         return@withContext try {
             selected.network.socketFactory.createSocket().use { socket ->
                 socket.soTimeout = readTimeoutMs
-                socket.connect(java.net.InetSocketAddress(endpoint.host, endpoint.imuPort), connectTimeoutMs)
+                socket.connect(java.net.InetSocketAddress(endpoint.host, endpoint.streamPort), connectTimeoutMs)
                 val connectMs = (System.nanoTime() - startNanos) / 1_000_000
                 val localSocket = "${socket.localAddress.hostAddress}:${socket.localPort}"
                 val remoteSocket = "${socket.inetAddress.hostAddress}:${socket.port}"
-                val frames = mutableListOf<DecodedImuFrame>()
+                val frames = mutableListOf<DecodedSensorFrame>()
                 val captureStartNanos = System.nanoTime()
                 var pending = ByteArray(0)
                 var readStatus = "completed"
@@ -204,7 +204,7 @@ class OneProImuClient(
                             }
                         }
                         val framePayload = pending.copyOfRange(0, frameSizeBytes)
-                        frames += ImuFrameDecoder.decode(
+                        frames += StreamFrameDecoder.decode(
                             index = frames.size,
                             payload = framePayload,
                             captureMonotonicNanos = readNanos
@@ -214,12 +214,12 @@ class OneProImuClient(
                 }
                 val captureEndNanos = System.nanoTime()
                 val success = frames.isNotEmpty()
-                val rateEstimate = ImuRateEstimator.estimate(
+                val rateEstimate = StreamRateEstimator.estimate(
                     frames = frames,
                     captureStartNanos = captureStartNanos,
                     captureEndNanos = captureEndNanos
                 )
-                ImuReadResult(
+                StreamReadResult(
                     success = success,
                     networkHandle = selected.network.networkHandle,
                     interfaceName = selected.interfaceName,
@@ -234,12 +234,12 @@ class OneProImuClient(
             }
         } catch (t: Throwable) {
             val connectMs = (System.nanoTime() - startNanos) / 1_000_000
-            ImuReadResult(
+            StreamReadResult(
                 success = false,
                 networkHandle = selected.network.networkHandle,
                 interfaceName = selected.interfaceName,
                 localSocket = null,
-                remoteSocket = "${endpoint.host}:${endpoint.imuPort}",
+                remoteSocket = "${endpoint.host}:${endpoint.streamPort}",
                 connectMs = connectMs,
                 frames = emptyList(),
                 rateEstimate = null,
@@ -252,7 +252,7 @@ class OneProImuClient(
     /**
      * Starts a head-tracking event stream for the configured endpoint
      *
-     * This is a cold [Flow], so each collection opens a fresh IMU socket session.
+     * This is a cold [Flow], so each collection opens a fresh socket session.
      * Cancel collection to stop streaming.
      */
     @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
@@ -285,7 +285,7 @@ class OneProImuClient(
 
         val controlChannel = config.controlChannel ?: HeadTrackingControlChannel()
         val diagnosticsTracker = HeadTrackingDiagnosticsTracker()
-        val framer = OneProImuMessageParser.StreamFramer()
+        val framer = OneProStreamMessageParser.StreamFramer()
         val tracker = OneProHeadTracker(
             OneProHeadTrackerConfig(
                 calibrationSampleTarget = config.calibrationSampleTarget,
@@ -307,7 +307,7 @@ class OneProImuClient(
                 socket.soTimeout = config.readTimeoutMs
                 val connectStart = System.nanoTime()
                 socket.connect(
-                    java.net.InetSocketAddress(endpoint.host, endpoint.imuPort),
+                    java.net.InetSocketAddress(endpoint.host, endpoint.streamPort),
                     config.connectTimeoutMs
                 )
                 val connectMs = (System.nanoTime() - connectStart) / 1_000_000
@@ -348,12 +348,12 @@ class OneProImuClient(
 
                     val appendResult = framer.append(readBuffer.copyOf(readCount))
                     diagnosticsTracker.recordParserDelta(appendResult.diagnosticsDelta)
-                    if (appendResult.imuSamples.isEmpty()) {
+                    if (appendResult.sensorSamples.isEmpty()) {
                         continue
                     }
 
                     val captureMonotonicNanos = System.nanoTime()
-                    appendResult.imuSamples.forEach { imuSample ->
+                    appendResult.sensorSamples.forEach { sensorSample ->
                         if (controlChannel.consumeRecalibrationRequest()) {
                             tracker.resetCalibration()
                             calibrationProgressReported = -1
@@ -369,7 +369,7 @@ class OneProImuClient(
                         }
 
                         if (!tracker.isCalibrated) {
-                            val calibrationState = tracker.calibrateGyroscope(imuSample)
+                            val calibrationState = tracker.calibrateGyroscope(sensorSample)
                             if (shouldEmitCalibrationProgress(calibrationState, calibrationProgressReported)) {
                                 calibrationProgressReported = calibrationState.sampleCount
                                 emit(
@@ -393,7 +393,7 @@ class OneProImuClient(
                         }
 
                         val update = tracker.update(
-                            imuSample = imuSample,
+                            sensorSample = sensorSample,
                             timestampNanos = captureMonotonicNanos,
                             fallbackDeltaSeconds = config.fallbackDeltaTimeSeconds,
                             maxDeltaSeconds = config.maxDeltaTimeSeconds
@@ -418,7 +418,7 @@ class OneProImuClient(
                                     sampleIndex = sampleIndex,
                                     captureMonotonicNanos = captureMonotonicNanos,
                                     deltaTimeSeconds = update.deltaTimeSeconds,
-                                    imuSample = imuSample,
+                                    sensorSample = sensorSample,
                                     absoluteOrientation = update.absoluteOrientation,
                                     relativeOrientation = relative,
                                     calibrationSampleCount = tracker.calibrationCount,

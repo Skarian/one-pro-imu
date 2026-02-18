@@ -1,4 +1,4 @@
-package io.onepro.imu
+package io.onepro.xr
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -19,9 +19,9 @@ class OneProHeadTrackerTest {
             )
         )
 
-        val s1 = tracker.calibrateGyroscope(OneProImuSample(1.0f, 2.0f, -1.0f, 0.0f, 0.0f, 1.0f))
-        val s2 = tracker.calibrateGyroscope(OneProImuSample(2.0f, 2.0f, -1.0f, 0.0f, 0.0f, 1.0f))
-        val s3 = tracker.calibrateGyroscope(OneProImuSample(3.0f, 2.0f, -1.0f, 0.0f, 0.0f, 1.0f))
+        val s1 = tracker.calibrateGyroscope(OneProSensorSample(1.0f, 2.0f, -1.0f, 0.0f, 0.0f, 1.0f))
+        val s2 = tracker.calibrateGyroscope(OneProSensorSample(2.0f, 2.0f, -1.0f, 0.0f, 0.0f, 1.0f))
+        val s3 = tracker.calibrateGyroscope(OneProSensorSample(3.0f, 2.0f, -1.0f, 0.0f, 0.0f, 1.0f))
 
         assertFalse(s1.isCalibrated)
         assertFalse(s2.isCalibrated)
@@ -43,10 +43,10 @@ class OneProHeadTrackerTest {
             )
         )
 
-        tracker.calibrateGyroscope(OneProImuSample(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f))
+        tracker.calibrateGyroscope(OneProSensorSample(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f))
 
         val firstUpdate = tracker.update(
-            imuSample = OneProImuSample(0.0f, 90.0f, 0.0f, 0.0f, 0.0f, 1.0f),
+            sensorSample = OneProSensorSample(0.0f, 90.0f, 0.0f, 0.0f, 0.0f, 1.0f),
             timestampNanos = 1_000_000_000L,
             fallbackDeltaSeconds = 0.01f,
             maxDeltaSeconds = 0.1f
@@ -54,7 +54,7 @@ class OneProHeadTrackerTest {
         assertNull(firstUpdate)
 
         val secondUpdate = tracker.update(
-            imuSample = OneProImuSample(0.0f, 90.0f, 0.0f, 0.0f, 0.0f, 1.0f),
+            sensorSample = OneProSensorSample(0.0f, 90.0f, 0.0f, 0.0f, 0.0f, 1.0f),
             timestampNanos = 1_100_000_000L,
             fallbackDeltaSeconds = 0.01f,
             maxDeltaSeconds = 0.1f
@@ -67,7 +67,7 @@ class OneProHeadTrackerTest {
         assertEquals(0.0f, zeroed.yaw, 0.0001f)
 
         tracker.update(
-            imuSample = OneProImuSample(0.0f, 90.0f, 0.0f, 0.0f, 0.0f, 1.0f),
+            sensorSample = OneProSensorSample(0.0f, 90.0f, 0.0f, 0.0f, 0.0f, 1.0f),
             timestampNanos = 1_200_000_000L,
             fallbackDeltaSeconds = 0.01f,
             maxDeltaSeconds = 0.1f
@@ -88,8 +88,8 @@ class OneProHeadTrackerTest {
             )
         )
 
-        tracker.calibrateGyroscope(OneProImuSample(1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f))
-        tracker.calibrateGyroscope(OneProImuSample(1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f))
+        tracker.calibrateGyroscope(OneProSensorSample(1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f))
+        tracker.calibrateGyroscope(OneProSensorSample(1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f))
         assertTrue(tracker.isCalibrated)
 
         tracker.resetCalibration()

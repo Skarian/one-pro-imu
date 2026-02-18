@@ -22,7 +22,7 @@ val githubPackagesToken = providers.gradleProperty("GITHUB_PACKAGES_TOKEN")
     .orElse(providers.environmentVariable("GITHUB_TOKEN"))
 
 android {
-    namespace = "io.onepro.imu"
+    namespace = "io.onepro.xr"
     compileSdk = 35
 
     defaultConfig {
@@ -56,7 +56,7 @@ publishing {
     publications {
         register<MavenPublication>("release") {
             groupId = "io.onepro"
-            artifactId = "oneproimu"
+            artifactId = "oneproxr"
             version = publishVersion.get()
 
             afterEvaluate {
@@ -64,8 +64,8 @@ publishing {
             }
 
             pom {
-                name.set("oneproimu")
-                description.set("Android library for XREAL One Pro IMU streaming and head tracking")
+                name.set("oneproxr")
+                description.set("Android library for XREAL One Pro XR sensor streaming and head tracking")
                 url.set(
                     "https://github.com/${
                         githubPackagesRepository.orElse("UNCONFIRMED/UNCONFIRMED").get()

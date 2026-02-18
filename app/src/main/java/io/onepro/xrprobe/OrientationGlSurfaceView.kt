@@ -1,4 +1,4 @@
-package io.onepro.imuprobe
+package io.onepro.xrprobe
 
 import android.content.Context
 import android.graphics.Canvas
@@ -6,7 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.View
-import io.onepro.imu.HeadOrientationDegrees
+import io.onepro.xr.HeadOrientationDegrees
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin

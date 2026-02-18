@@ -1,4 +1,4 @@
-package io.onepro.imu
+package io.onepro.xr
 
 import kotlin.math.atan2
 import kotlin.math.sqrt
@@ -58,14 +58,14 @@ internal class OneProHeadTracker(
 
     private var lastTimestampNanos: Long? = null
 
-    fun calibrateGyroscope(imuSample: OneProImuSample): OneProCalibrationState {
+    fun calibrateGyroscope(sensorSample: OneProSensorSample): OneProCalibrationState {
         if (isCalibrated) {
             return calibrationState()
         }
 
-        gyroSumX += imuSample.gx
-        gyroSumY += imuSample.gy
-        gyroSumZ += imuSample.gz
+        gyroSumX += sensorSample.gx
+        gyroSumY += sensorSample.gy
+        gyroSumZ += sensorSample.gz
         calibrationCount += 1
 
         if (calibrationCount >= config.calibrationSampleTarget) {
@@ -124,7 +124,7 @@ internal class OneProHeadTracker(
     }
 
     fun update(
-        imuSample: OneProImuSample,
+        sensorSample: OneProSensorSample,
         timestampNanos: Long,
         fallbackDeltaSeconds: Float,
         maxDeltaSeconds: Float
@@ -146,29 +146,29 @@ internal class OneProHeadTracker(
             maxSeconds = maxDeltaSeconds
         )
 
-        val gyroX = imuSample.gx - gyroBiasX
-        val gyroY = imuSample.gy - gyroBiasY
-        val gyroZ = imuSample.gz - gyroBiasZ
+        val gyroX = sensorSample.gx - gyroBiasX
+        val gyroY = sensorSample.gy - gyroBiasY
+        val gyroZ = sensorSample.gz - gyroBiasZ
 
         val pitchGyro = pitch + gyroX * deltaTimeSeconds
         val yawGyro = yaw + gyroY * deltaTimeSeconds
         val rollGyro = roll + gyroZ * deltaTimeSeconds
 
         val accMagnitude = sqrt(
-            imuSample.ax * imuSample.ax +
-                imuSample.ay * imuSample.ay +
-                imuSample.az * imuSample.az
+            sensorSample.ax * sensorSample.ax +
+                sensorSample.ay * sensorSample.ay +
+                sensorSample.az * sensorSample.az
         )
 
         if (accMagnitude > 0.01f) {
             val pitchAccel = Math.toDegrees(
                 atan2(
-                    -imuSample.ax.toDouble(),
-                    sqrt((imuSample.ay * imuSample.ay + imuSample.az * imuSample.az).toDouble())
+                    -sensorSample.ax.toDouble(),
+                    sqrt((sensorSample.ay * sensorSample.ay + sensorSample.az * sensorSample.az).toDouble())
                 )
             ).toFloat()
             val rollAccel = Math.toDegrees(
-                atan2(imuSample.ay.toDouble(), imuSample.az.toDouble())
+                atan2(sensorSample.ay.toDouble(), sensorSample.az.toDouble())
             ).toFloat()
             val alpha = config.complementaryFilterAlpha
             pitch = alpha * pitchGyro + (1.0f - alpha) * pitchAccel

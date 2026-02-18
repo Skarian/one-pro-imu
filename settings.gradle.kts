@@ -16,4 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "one-pro-imu"
 include(":app")
-include(":oneproimu")
+include(":oneproxr")

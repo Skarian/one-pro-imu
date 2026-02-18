@@ -1,41 +1,41 @@
-package io.onepro.imu
+package io.onepro.xr
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-internal object OneProImuMessageParser {
+internal object OneProStreamMessageParser {
     private val primaryHeader = byteArrayOf(0x28, 0x36, 0x00, 0x00, 0x00, 0x80.toByte())
     private val alternateHeader = byteArrayOf(0x27, 0x36, 0x00, 0x00, 0x00, 0x80.toByte())
     private val headers = arrayOf(primaryHeader, alternateHeader)
     private val sensorMarker = byteArrayOf(0x00, 0x40, 0x1F, 0x00, 0x00, 0x40)
 
-    private const val imuOffsetFromHeader = 28
+    private const val sensorOffsetFromHeader = 28
     private const val nominalFrameBytes = 134
-    private const val minImuBytes = 24
+    private const val minSensorBytes = 24
     private const val maxPendingBytes = 131_072
     private val minHeaderBytes = headers.minOf { it.size }
     private val maxHeaderBytes = headers.maxOf { it.size }
-    private val minimumFrameBytes = minHeaderBytes + imuOffsetFromHeader + minImuBytes + sensorMarker.size
+    private val minimumFrameBytes = minHeaderBytes + sensorOffsetFromHeader + minSensorBytes + sensorMarker.size
 
     data class ParseDiagnosticsDelta(
         val droppedBytes: Long = 0,
         val parsedMessageCount: Long = 0,
         val tooShortMessageCount: Long = 0,
         val missingSensorMarkerCount: Long = 0,
-        val invalidImuSliceCount: Long = 0,
+        val invalidSensorSliceCount: Long = 0,
         val floatDecodeFailureCount: Long = 0
     ) {
         val rejectedMessageCount: Long
             get() {
                 return tooShortMessageCount +
                     missingSensorMarkerCount +
-                    invalidImuSliceCount +
+                    invalidSensorSliceCount +
                     floatDecodeFailureCount
             }
     }
 
     data class AppendResult(
-        val imuSamples: List<OneProImuSample>,
+        val sensorSamples: List<OneProSensorSample>,
         val diagnosticsDelta: ParseDiagnosticsDelta
     )
 
@@ -48,12 +48,12 @@ internal object OneProImuMessageParser {
             }
 
             pending += chunk
-            val imuSamples = mutableListOf<OneProImuSample>()
+            val sensorSamples = mutableListOf<OneProSensorSample>()
             var droppedBytes = 0L
             var parsedMessageCount = 0L
             var tooShortMessageCount = 0L
             var missingSensorMarkerCount = 0L
-            var invalidImuSliceCount = 0L
+            var invalidSensorSliceCount = 0L
             var floatDecodeFailureCount = 0L
 
             while (pending.size >= minHeaderBytes) {
@@ -91,7 +91,7 @@ internal object OneProImuMessageParser {
                 when (val outcome = decodeMessage(message, activeHeaderMatch.header)) {
                     is DecodeOutcome.Success -> {
                         parsedMessageCount += 1
-                        imuSamples += outcome.sample
+                        sensorSamples += outcome.sample
                         val consumeCount = when {
                             nextHeaderIndex > 0 -> nextHeaderIndex
                             pending.size >= nominalFrameBytes -> nominalFrameBytes
@@ -120,8 +120,8 @@ internal object OneProImuMessageParser {
                         }
                     }
 
-                    DecodeOutcome.InvalidImuSlice -> {
-                        invalidImuSliceCount += 1
+                    DecodeOutcome.InvalidSensorSlice -> {
+                        invalidSensorSliceCount += 1
                         if (nextHeaderIndex > 0) {
                             droppedBytes += nextHeaderIndex.toLong()
                             pending = pending.copyOfRange(nextHeaderIndex, pending.size)
@@ -159,13 +159,13 @@ internal object OneProImuMessageParser {
             }
 
             return AppendResult(
-                imuSamples = imuSamples,
+                sensorSamples = sensorSamples,
                 diagnosticsDelta = ParseDiagnosticsDelta(
                     droppedBytes = droppedBytes,
                     parsedMessageCount = parsedMessageCount,
                     tooShortMessageCount = tooShortMessageCount,
                     missingSensorMarkerCount = missingSensorMarkerCount,
-                    invalidImuSliceCount = invalidImuSliceCount,
+                    invalidSensorSliceCount = invalidSensorSliceCount,
                     floatDecodeFailureCount = floatDecodeFailureCount
                 )
             )
@@ -174,12 +174,12 @@ internal object OneProImuMessageParser {
 
     private sealed interface DecodeOutcome {
         data class Success(
-            val sample: OneProImuSample,
+            val sample: OneProSensorSample,
             val consumedByteCount: Int
         ) : DecodeOutcome
         data object TooShort : DecodeOutcome
         data object MissingSensorMarker : DecodeOutcome
-        data object InvalidImuSlice : DecodeOutcome
+        data object InvalidSensorSlice : DecodeOutcome
         data object FloatDecodeFailure : DecodeOutcome
     }
 
@@ -189,9 +189,9 @@ internal object OneProImuMessageParser {
     )
 
     private fun decodeMessage(message: ByteArray, header: ByteArray): DecodeOutcome {
-        val imuStartOffset = header.size + imuOffsetFromHeader
-        val markerSearchStart = imuStartOffset + minImuBytes
-        val minimumBytesForHeader = header.size + imuOffsetFromHeader + minImuBytes + sensorMarker.size
+        val sensorStartOffset = header.size + sensorOffsetFromHeader
+        val markerSearchStart = sensorStartOffset + minSensorBytes
+        val minimumBytesForHeader = header.size + sensorOffsetFromHeader + minSensorBytes + sensorMarker.size
         if (message.size < minimumBytesForHeader || message.size < minimumFrameBytes) {
             return DecodeOutcome.TooShort
         }
@@ -200,13 +200,13 @@ internal object OneProImuMessageParser {
         if (sensorMarkerIndex < 0) {
             return DecodeOutcome.MissingSensorMarker
         }
-        val imuSliceLength = sensorMarkerIndex - imuStartOffset
-        if (imuSliceLength < minImuBytes) {
-            return DecodeOutcome.InvalidImuSlice
+        val sensorSliceLength = sensorMarkerIndex - sensorStartOffset
+        if (sensorSliceLength < minSensorBytes) {
+            return DecodeOutcome.InvalidSensorSlice
         }
 
         val values = try {
-            ByteBuffer.wrap(message, imuStartOffset, minImuBytes)
+            ByteBuffer.wrap(message, sensorStartOffset, minSensorBytes)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .let { buffer ->
                     FloatArray(6) { buffer.float }
@@ -216,7 +216,7 @@ internal object OneProImuMessageParser {
         }
 
         return DecodeOutcome.Success(
-            OneProImuSample(
+            OneProSensorSample(
                 gx = values[0],
                 gy = values[1],
                 gz = values[2],

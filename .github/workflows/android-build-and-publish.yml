@@ -27,11 +27,11 @@ jobs:
       - name: Build, test, and lint
         run: |
           ./gradlew --warning-mode all \
-            :oneproimu:testDebugUnitTest \
-            :oneproimu:lintDebug \
+            :oneproxr:testDebugUnitTest \
+            :oneproxr:lintDebug \
             :app:assembleDebug \
             :app:lintDebug \
-            :oneproimu:assembleRelease \
+            :oneproxr:assembleRelease \
             :app:assembleRelease
 
       - name: Upload demo APK
@@ -69,10 +69,10 @@ jobs:
           echo "PUBLISH_VERSION=${PUBLISH_VERSION}" >> "$GITHUB_ENV"
           echo "Using publish version: ${PUBLISH_VERSION}"
 
-      - name: Publish oneproimu to GitHub Packages
+      - name: Publish oneproxr to GitHub Packages
         run: |
           ./gradlew \
-            :oneproimu:publishReleasePublicationToGitHubPackagesRepository \
+            :oneproxr:publishReleasePublicationToGitHubPackagesRepository \
             -PPUBLISH_VERSION="${PUBLISH_VERSION}" \
             -PGITHUB_PACKAGES_REPOSITORY="${GITHUB_REPOSITORY}"
         env:

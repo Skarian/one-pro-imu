@@ -1,4 +1,4 @@
-package io.onepro.imu
+package io.onepro.xr
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -6,7 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class OneProImuMessageParserTest {
+class OneProStreamMessageParserTest {
     private val primaryHeader = byteArrayOf(0x28, 0x36, 0x00, 0x00, 0x00, 0x80.toByte())
     private val alternateHeader = byteArrayOf(0x27, 0x36, 0x00, 0x00, 0x00, 0x80.toByte())
 
@@ -21,15 +21,15 @@ class OneProImuMessageParserTest {
             az = 7.5f
         )
 
-        val framer = OneProImuMessageParser.StreamFramer()
+        val framer = OneProStreamMessageParser.StreamFramer()
         val result = framer.append(frame)
 
-        assertEquals(1, result.imuSamples.size)
+        assertEquals(1, result.sensorSamples.size)
         assertEquals(1L, result.diagnosticsDelta.parsedMessageCount)
         assertEquals(0L, result.diagnosticsDelta.rejectedMessageCount)
         assertEquals(0L, result.diagnosticsDelta.droppedBytes)
 
-        val sample = result.imuSamples.first()
+        val sample = result.sensorSamples.first()
         assertEquals(1.5f, sample.gx, 0.0001f)
         assertEquals(-2.25f, sample.gy, 0.0001f)
         assertEquals(3.75f, sample.gz, 0.0001f)
@@ -60,10 +60,10 @@ class OneProImuMessageParserTest {
             includeTrailingPacketBytes = true
         )
 
-        val framer = OneProImuMessageParser.StreamFramer()
+        val framer = OneProStreamMessageParser.StreamFramer()
         val result = framer.append(packet1 + packet2)
 
-        assertEquals(2, result.imuSamples.size)
+        assertEquals(2, result.sensorSamples.size)
         assertEquals(2L, result.diagnosticsDelta.parsedMessageCount)
         assertEquals(0L, result.diagnosticsDelta.rejectedMessageCount)
         assertEquals(0L, result.diagnosticsDelta.droppedBytes)
@@ -80,14 +80,14 @@ class OneProImuMessageParserTest {
             az = 1.0f
         )
 
-        val framer = OneProImuMessageParser.StreamFramer()
+        val framer = OneProStreamMessageParser.StreamFramer()
         val first = framer.append(byteArrayOf(0x10, 0x11, 0x12) + frame.copyOfRange(0, 25))
         val second = framer.append(frame.copyOfRange(25, frame.size))
 
         assertEquals(3L, first.diagnosticsDelta.droppedBytes)
-        assertTrue(first.imuSamples.isEmpty())
+        assertTrue(first.sensorSamples.isEmpty())
 
-        assertEquals(1, second.imuSamples.size)
+        assertEquals(1, second.sensorSamples.size)
         assertEquals(1L, second.diagnosticsDelta.parsedMessageCount)
     }
 
@@ -103,10 +103,10 @@ class OneProImuMessageParserTest {
             header = alternateHeader
         )
 
-        val framer = OneProImuMessageParser.StreamFramer()
+        val framer = OneProStreamMessageParser.StreamFramer()
         val result = framer.append(frame)
 
-        assertEquals(1, result.imuSamples.size)
+        assertEquals(1, result.sensorSamples.size)
         assertEquals(1L, result.diagnosticsDelta.parsedMessageCount)
         assertEquals(0L, result.diagnosticsDelta.rejectedMessageCount)
     }
@@ -123,10 +123,10 @@ class OneProImuMessageParserTest {
             extraSensorDataBytes = 41
         )
 
-        val framer = OneProImuMessageParser.StreamFramer()
+        val framer = OneProStreamMessageParser.StreamFramer()
         val result = framer.append(frame)
 
-        assertEquals(1, result.imuSamples.size)
+        assertEquals(1, result.sensorSamples.size)
         assertEquals(1L, result.diagnosticsDelta.parsedMessageCount)
         assertEquals(0L, result.diagnosticsDelta.rejectedMessageCount)
     }
@@ -143,10 +143,10 @@ class OneProImuMessageParserTest {
             includeSensorMarker = false
         )
 
-        val framer = OneProImuMessageParser.StreamFramer()
+        val framer = OneProStreamMessageParser.StreamFramer()
         val result = framer.append(invalidFrame)
 
-        assertTrue(result.imuSamples.isEmpty())
+        assertTrue(result.sensorSamples.isEmpty())
         assertEquals(0L, result.diagnosticsDelta.parsedMessageCount)
         assertEquals(1L, result.diagnosticsDelta.missingSensorMarkerCount)
         assertEquals(1L, result.diagnosticsDelta.rejectedMessageCount)

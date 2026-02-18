@@ -1,13 +1,13 @@
-package io.onepro.imu
+package io.onepro.xr
 
 import kotlin.math.round
 
-object ImuRateEstimator {
+object StreamRateEstimator {
     fun estimate(
-        frames: List<DecodedImuFrame>,
+        frames: List<DecodedSensorFrame>,
         captureStartNanos: Long,
         captureEndNanos: Long
-    ): ImuRateEstimate? {
+    ): StreamRateEstimate? {
         if (frames.isEmpty()) {
             return null
         }
@@ -28,7 +28,7 @@ object ImuRateEstimator {
         val word14HzAssumingMicros = word14Stats?.avg?.takeIf { it > 0.0 }?.let { 1_000_000.0 / it }
         val word14HzAssumingNanos = word14Stats?.avg?.takeIf { it > 0.0 }?.let { 1_000_000_000.0 / it }
 
-        return ImuRateEstimate(
+        return StreamRateEstimate(
             frameCount = frames.size,
             captureWindowMs = roundTo3(captureWindowMs),
             observedFrameHz = roundTo3(observedFrameHz),

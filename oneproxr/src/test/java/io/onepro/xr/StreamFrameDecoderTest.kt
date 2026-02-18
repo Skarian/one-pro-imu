@@ -1,16 +1,16 @@
-package io.onepro.imu
+package io.onepro.xr
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-class ImuFrameDecoderTest {
+class StreamFrameDecoderTest {
     @Test
     fun decodesObservedFrameFromDevice() {
         val payload = hexToBytes("28360000008018307d00000000008a41ac8a4f00000000000000000000000400")
 
-        val decoded = ImuFrameDecoder.decode(index = 0, payload = payload)
+        val decoded = StreamFrameDecoder.decode(index = 0, payload = payload)
 
         assertEquals(32, decoded.byteCount)
         assertEquals(40, decoded.candidateReportId)
@@ -25,7 +25,7 @@ class ImuFrameDecoderTest {
     fun handlesShortFrameWithoutThrowing() {
         val payload = hexToBytes("0102030405")
 
-        val decoded = ImuFrameDecoder.decode(index = 0, payload = payload)
+        val decoded = StreamFrameDecoder.decode(index = 0, payload = payload)
 
         assertEquals(5, decoded.byteCount)
         assertEquals(1, decoded.candidateReportId)
@@ -47,7 +47,7 @@ class ImuFrameDecoderTest {
         payload[25] = 0x00
         payload[26] = 0x80.toByte()
 
-        val decoded = ImuFrameDecoder.decode(index = 0, payload = payload)
+        val decoded = StreamFrameDecoder.decode(index = 0, payload = payload)
 
         assertEquals(197121, decoded.candidateGyroPackedX)
         assertEquals(8388607, decoded.candidateGyroPackedY)

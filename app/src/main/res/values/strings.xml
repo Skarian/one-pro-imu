@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">One Pro Head Tracking Demo</string>
-    <string name="title_test">One Pro IMU Head Tracking</string>
+    <string name="app_name">One Pro XR Tracking Demo</string>
+    <string name="title_test">One Pro XR Head Tracking</string>
     <string name="hint_host">Host</string>
     <string name="hint_ports">Ports (comma separated)</string>
     <string name="default_host">169.254.2.1</string>

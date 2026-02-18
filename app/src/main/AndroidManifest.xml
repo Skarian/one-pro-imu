@@ -8,7 +8,7 @@
         android:allowBackup="true"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.ImuProbe">
+        android:theme="@style/Theme.XrProbe">
         <activity
             android:name=".MainActivity"
             android:exported="true">

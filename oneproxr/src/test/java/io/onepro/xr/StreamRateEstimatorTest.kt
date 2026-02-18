@@ -1,10 +1,10 @@
-package io.onepro.imu
+package io.onepro.xr
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-class ImuRateEstimatorTest {
+class StreamRateEstimatorTest {
     @Test
     fun estimateComputesCaptureAndDeltaRates() {
         val frames = listOf(
@@ -14,7 +14,7 @@ class ImuRateEstimatorTest {
             frame(index = 3, captureNs = 700_000_000L, word14 = 4_000L)
         )
 
-        val estimate = ImuRateEstimator.estimate(
+        val estimate = StreamRateEstimator.estimate(
             frames = frames,
             captureStartNanos = 0L,
             captureEndNanos = 1_000_000_000L
@@ -36,7 +36,7 @@ class ImuRateEstimatorTest {
 
     @Test
     fun estimateReturnsNullForEmptyFrames() {
-        val estimate = ImuRateEstimator.estimate(
+        val estimate = StreamRateEstimator.estimate(
             frames = emptyList(),
             captureStartNanos = 0L,
             captureEndNanos = 1_000_000_000L
@@ -45,8 +45,8 @@ class ImuRateEstimatorTest {
         assertNull(estimate)
     }
 
-    private fun frame(index: Int, captureNs: Long?, word14: Long?): DecodedImuFrame {
-        return DecodedImuFrame(
+    private fun frame(index: Int, captureNs: Long?, word14: Long?): DecodedSensorFrame {
+        return DecodedSensorFrame(
             index = index,
             byteCount = 32,
             captureMonotonicNanos = captureNs,

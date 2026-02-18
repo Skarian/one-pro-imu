@@ -1,4 +1,4 @@
-package io.onepro.imu
+package io.onepro.xr
 
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -7,10 +7,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * Defaults target the common link-local setup used by the demo app
  */
-data class OneProImuEndpoint(
+data class OneProXrEndpoint(
     val host: String = "169.254.2.1",
     val controlPort: Int = 52999,
-    val imuPort: Int = 52998
+    val streamPort: Int = 52998
 )
 
 /** Basic snapshot of a local network interface */
@@ -33,14 +33,14 @@ data class AddressCandidateInfo(
     val address: String
 )
 
-/** Routing summary returned by [OneProImuClient.describeRouting] */
+/** Routing summary returned by [OneProXrClient.describeRouting] */
 data class RoutingSnapshot(
     val interfaces: List<InterfaceInfo>,
     val networkCandidates: List<NetworkCandidateInfo>,
     val addressCandidates: List<AddressCandidateInfo>
 )
 
-/** Result of [OneProImuClient.connectControlChannel] */
+/** Result of [OneProXrClient.connectControlChannel] */
 data class ControlChannelResult(
     val success: Boolean,
     val networkHandle: Long?,
@@ -52,8 +52,8 @@ data class ControlChannelResult(
     val error: String?
 )
 
-/** Parsed frame metadata returned by [OneProImuClient.readImuFrames] */
-data class DecodedImuFrame(
+/** Parsed frame metadata returned by [OneProXrClient.readSensorFrames] */
+data class DecodedSensorFrame(
     val index: Int,
     val byteCount: Int,
     val captureMonotonicNanos: Long?,
@@ -72,7 +72,7 @@ data class DecodedImuFrame(
 )
 
 /** Observed receive cadence and inferred rate information for sampled frames */
-data class ImuRateEstimate(
+data class StreamRateEstimate(
     val frameCount: Int,
     val captureWindowMs: Double?,
     val observedFrameHz: Double?,
@@ -86,16 +86,16 @@ data class ImuRateEstimate(
     val candidateWord14HzAssumingNanos: Double?
 )
 
-/** Result of [OneProImuClient.readImuFrames] */
-data class ImuReadResult(
+/** Result of [OneProXrClient.readSensorFrames] */
+data class StreamReadResult(
     val success: Boolean,
     val networkHandle: Long?,
     val interfaceName: String?,
     val localSocket: String?,
     val remoteSocket: String?,
     val connectMs: Long,
-    val frames: List<DecodedImuFrame>,
-    val rateEstimate: ImuRateEstimate?,
+    val frames: List<DecodedSensorFrame>,
+    val rateEstimate: StreamRateEstimate?,
     val readStatus: String,
     val error: String?
 )
@@ -108,11 +108,11 @@ data class Vector3f(
 )
 
 /**
- * One Pro IMU sample decoded from a parser message
+ * One Pro sensor sample decoded from a stream message
  *
- * Axes and ordering match the current One Pro parser mapping used by this module
+ * Axes and ordering match the current parser mapping used by this module
  */
-data class OneProImuSample(
+data class OneProSensorSample(
     val gx: Float,
     val gy: Float,
     val gz: Float,
@@ -138,7 +138,7 @@ data class HeadTrackingSample(
     val sampleIndex: Long,
     val captureMonotonicNanos: Long,
     val deltaTimeSeconds: Float,
-    val imuSample: OneProImuSample,
+    val sensorSample: OneProSensorSample,
     val absoluteOrientation: HeadOrientationDegrees,
     val relativeOrientation: HeadOrientationDegrees,
     val calibrationSampleCount: Int,
@@ -154,7 +154,7 @@ data class HeadTrackingStreamDiagnostics(
     val droppedByteCount: Long,
     val tooShortMessageCount: Long,
     val missingSensorMarkerCount: Long,
-    val invalidImuSliceCount: Long,
+    val invalidSensorSliceCount: Long,
     val floatDecodeFailureCount: Long,
     val observedSampleRateHz: Double?,
     val receiveDeltaMinMs: Double?,
@@ -191,12 +191,12 @@ class HeadTrackingControlChannel {
 }
 
 /**
- * Runtime tuning options for [OneProImuClient.streamHeadTracking]
+ * Runtime tuning options for [OneProXrClient.streamHeadTracking]
  *
  * Defaults are chosen for the demo app and are generally safe for first integration
  */
 data class HeadTrackingStreamConfig(
-    /** Socket connect timeout for IMU stream connection attempts */
+    /** Socket connect timeout for stream connection attempts */
     val connectTimeoutMs: Int = 1500,
     /** Socket read timeout while waiting for stream bytes */
     val readTimeoutMs: Int = 700,
@@ -226,7 +226,7 @@ data class HeadTrackingStreamConfig(
     val controlChannel: HeadTrackingControlChannel? = null
 )
 
-/** Event stream emitted by [OneProImuClient.streamHeadTracking] */
+/** Event stream emitted by [OneProXrClient.streamHeadTracking] */
 sealed interface HeadTrackingStreamEvent {
     /** Stream socket connected and initial transport metadata is available */
     data class Connected(
@@ -245,7 +245,7 @@ sealed interface HeadTrackingStreamEvent {
         val isComplete: Boolean
     ) : HeadTrackingStreamEvent
 
-    /** New tracking sample with IMU payload and orientation outputs */
+    /** New tracking sample with sensor payload and orientation outputs */
     data class TrackingSampleAvailable(
         val sample: HeadTrackingSample
     ) : HeadTrackingStreamEvent

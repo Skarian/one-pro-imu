@@ -1,4 +1,4 @@
-package io.onepro.imu
+package io.onepro.xr
 
 import kotlin.math.round
 
@@ -8,7 +8,7 @@ internal class HeadTrackingDiagnosticsTracker {
     private var droppedByteCount = 0L
     private var tooShortMessageCount = 0L
     private var missingSensorMarkerCount = 0L
-    private var invalidImuSliceCount = 0L
+    private var invalidSensorSliceCount = 0L
     private var floatDecodeFailureCount = 0L
 
     private var firstSampleCaptureNanos: Long? = null
@@ -16,12 +16,12 @@ internal class HeadTrackingDiagnosticsTracker {
     private var lastCaptureNanos: Long? = null
     private val receiveDeltaStats = RunningStats()
 
-    fun recordParserDelta(delta: OneProImuMessageParser.ParseDiagnosticsDelta) {
+    fun recordParserDelta(delta: OneProStreamMessageParser.ParseDiagnosticsDelta) {
         parsedMessageCount += delta.parsedMessageCount
         droppedByteCount += delta.droppedBytes
         tooShortMessageCount += delta.tooShortMessageCount
         missingSensorMarkerCount += delta.missingSensorMarkerCount
-        invalidImuSliceCount += delta.invalidImuSliceCount
+        invalidSensorSliceCount += delta.invalidSensorSliceCount
         floatDecodeFailureCount += delta.floatDecodeFailureCount
     }
 
@@ -56,12 +56,12 @@ internal class HeadTrackingDiagnosticsTracker {
             parsedMessageCount = parsedMessageCount,
             rejectedMessageCount = tooShortMessageCount +
                 missingSensorMarkerCount +
-                invalidImuSliceCount +
+                invalidSensorSliceCount +
                 floatDecodeFailureCount,
             droppedByteCount = droppedByteCount,
             tooShortMessageCount = tooShortMessageCount,
             missingSensorMarkerCount = missingSensorMarkerCount,
-            invalidImuSliceCount = invalidImuSliceCount,
+            invalidSensorSliceCount = invalidSensorSliceCount,
             floatDecodeFailureCount = floatDecodeFailureCount,
             observedSampleRateHz = roundTo3(observedRate),
             receiveDeltaMinMs = roundTo3(receiveDeltaStats.min),
