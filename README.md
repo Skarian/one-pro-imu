@@ -32,12 +32,14 @@ Entry point:
 
 Helpful methods:
 
-- `describeRouting()`
-- `connectControlChannel()`
-- `readSensorFrames()`
-- `streamHeadTracking(config)`
+- `start() / stop()`
+- `poseData`
+- `sensorData`
+- `zeroView() / recalibrate()`
+- `advanced.diagnostics`
+- `advanced.reports` (optional)
 
-For event semantics, lifecycle guidance, and troubleshooting, use
+For a minimal quickstart and full API behavior, use
 [`docs/android-library.md`](docs/android-library.md)
 
 ## Android Demo App Build / Install Instructions
@@ -66,6 +68,7 @@ adb shell am start -n io.onepro.xrprobe/.MainActivity
 - Uses Android `Network.socketFactory` for reliable link-local routing
 - Uses One Pro report framing (`magic + big-endian length`) with dual-header compatibility (`2836` and `2736`)
 - Parses full report payload parity fields (`device_id`, `hmd_time_nanos_device`, `report_type`, IMU vectors, magnetometer vectors, temperature, imu_id, frame_id)
+- Keeps raw vectors in protocol field order in `sensorData`; `poseData` uses a compatibility accel mapping to preserve baseline demo behavior
 - Uses device timestamp (`hmd_time_nanos_device`) for tracking integration with fail-fast monotonicity checks
 - Uses complementary-filter tracking with startup gyro calibration, zero-view, and recalibration support
 

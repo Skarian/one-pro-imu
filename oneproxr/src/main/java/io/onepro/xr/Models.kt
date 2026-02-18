@@ -1,6 +1,8 @@
 package io.onepro.xr
 
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 
 data class OneProXrEndpoint(
     val host: String = "169.254.2.1",
@@ -165,7 +167,8 @@ data class HeadTrackingSample(
     val relativeOrientation: HeadOrientationDegrees,
     val calibrationSampleCount: Int,
     val calibrationTarget: Int,
-    val isCalibrated: Boolean
+    val isCalibrated: Boolean,
+    val sourceDeviceTimeNs: ULong
 )
 
 data class HeadTrackingStreamDiagnostics(
@@ -184,7 +187,121 @@ data class HeadTrackingStreamDiagnostics(
     val receiveDeltaAvgMs: Double?
 )
 
-class HeadTrackingControlChannel {
+data class XrConnectionInfo(
+    val networkHandle: Long,
+    val interfaceName: String,
+    val localSocket: String,
+    val remoteSocket: String,
+    val connectMs: Long
+)
+
+enum class XrSessionErrorCode {
+    NETWORK_UNAVAILABLE,
+    STARTUP_TIMEOUT,
+    STREAM_ERROR,
+    INVALID_ARGUMENT,
+    NOT_CONNECTED
+}
+
+sealed interface XrSessionState {
+    data object Idle : XrSessionState
+
+    data object Connecting : XrSessionState
+
+    data class Calibrating(
+        val connectionInfo: XrConnectionInfo,
+        val calibrationSampleCount: Int,
+        val calibrationTarget: Int
+    ) : XrSessionState
+
+    data class Streaming(
+        val connectionInfo: XrConnectionInfo
+    ) : XrSessionState
+
+    data class Error(
+        val code: XrSessionErrorCode,
+        val message: String,
+        val causeType: String,
+        val recoverable: Boolean
+    ) : XrSessionState
+
+    data object Stopped : XrSessionState
+}
+
+enum class XrSensorUpdateSource {
+    IMU,
+    MAG
+}
+
+data class XrImuSample(
+    val gx: Float,
+    val gy: Float,
+    val gz: Float,
+    val ax: Float,
+    val ay: Float,
+    val az: Float,
+    val deviceTimeNs: ULong
+)
+
+data class XrMagSample(
+    val mx: Float,
+    val my: Float,
+    val mz: Float,
+    val deviceTimeNs: ULong
+)
+
+data class XrSensorSnapshot(
+    val imu: XrImuSample?,
+    val magnetometer: XrMagSample?,
+    val deviceId: ULong,
+    val temperatureCelsius: Float,
+    val frameId: OneProFrameId,
+    val imuId: Int,
+    val reportType: OneProReportType,
+    val imuDeviceTimeNs: ULong?,
+    val magDeviceTimeNs: ULong?,
+    val lastUpdatedSource: XrSensorUpdateSource
+)
+
+data class XrPoseSnapshot(
+    val relativeOrientation: HeadOrientationDegrees,
+    val absoluteOrientation: HeadOrientationDegrees,
+    val isCalibrated: Boolean,
+    val calibrationSampleCount: Int,
+    val calibrationTarget: Int,
+    val deltaTimeSeconds: Float,
+    val sourceDeviceTimeNs: ULong
+)
+
+enum class XrSceneMode(val wireValue: Int) {
+    ButtonsEnabled(0),
+    ButtonsDisabled(1)
+}
+
+enum class XrInputMode(val wireValue: Int) {
+    Regular(0),
+    SideBySide(1)
+}
+
+enum class XrDisplayConfiguration(val wireValue: Int) {
+    _1920x1080_60Hz(2),
+    _1920x1080_90Hz(3),
+    _1920x1080_120Hz(4),
+    _3840x1080_60Hz(5);
+
+    companion object {
+        fun fromWireValue(value: Int): XrDisplayConfiguration? {
+            return entries.firstOrNull { it.wireValue == value }
+        }
+    }
+}
+
+interface OneProXrAdvancedApi {
+    val diagnostics: StateFlow<HeadTrackingStreamDiagnostics?>
+    val reports: SharedFlow<OneProReportMessage>
+}
+
+internal class HeadTrackingControlChannel {
     private val zeroViewRequested = AtomicBoolean(false)
     private val recalibrationRequested = AtomicBoolean(false)
 
@@ -196,16 +313,16 @@ class HeadTrackingControlChannel {
         recalibrationRequested.set(true)
     }
 
-    internal fun consumeZeroViewRequest(): Boolean {
+    fun consumeZeroViewRequest(): Boolean {
         return zeroViewRequested.getAndSet(false)
     }
 
-    internal fun consumeRecalibrationRequest(): Boolean {
+    fun consumeRecalibrationRequest(): Boolean {
         return recalibrationRequested.getAndSet(false)
     }
 }
 
-data class HeadTrackingStreamConfig(
+internal data class HeadTrackingStreamConfig(
     val connectTimeoutMs: Int = 1500,
     val readTimeoutMs: Int = 700,
     val readChunkBytes: Int = 4096,
@@ -220,7 +337,7 @@ data class HeadTrackingStreamConfig(
     val controlChannel: HeadTrackingControlChannel? = null
 )
 
-sealed interface HeadTrackingStreamEvent {
+internal sealed interface HeadTrackingStreamEvent {
     data class Connected(
         val networkHandle: Long,
         val interfaceName: String,

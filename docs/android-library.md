@@ -1,44 +1,25 @@
 # Android Library Guide (`oneproxr`)
 
-This library gives Android apps direct access to XREAL One Pro report data and head tracking without the Unity-based XREAL SDK
+`oneproxr` gives Android apps direct access to XREAL One Pro tracking data without the Unity-based XREAL SDK
 
-## What this library provides
+## What you get
 
-- Link-local TCP routing helpers for One Pro control/report ports
-- Full typed decode of One Pro report payload fields:
-  - `device_id`
-  - `hmd_time_nanos_device`
-  - `report_type`
-  - `gx/gy/gz`
-  - `ax/ay/az`
-  - `mx/my/mz`
-  - `temperature`
-  - `imu_id`
-  - `frame_id`
-- A simple tracking flow for most apps (`streamHeadTracking`) with calibration + zero view
-- Advanced raw report access through `HeadTrackingStreamEvent.ReportAvailable`
-- Stream diagnostics counters for report routing and parser health
-- A capture helper (`captureStreamBytes`) for fixture generation and parser regression tests
+- simple runtime API for app lifecycle and tracking
+- typed sensor reports (`imu` + `magnetometer`)
+- orientation output ready for rendering (`poseData`)
+- optional diagnostics and raw report stream for advanced usage
 
-## Current scope
-
-- Target device: XREAL One Pro
-- Transport: direct TCP (`169.254.2.1` by default)
-- Tracking output: orientation in degrees (`pitch`, `yaw`, `roll`)
-- Rendering/scene management stays in your app
-
-## Prerequisites
+## Requirements
 
 - Android `minSdk 26`
 - Android `compileSdk 35`
-- Java/Kotlin target 17
-- Coroutines in your app module
-- XREAL One Pro connected and reachable from phone
-- Glasses mode set to `Follow` (stabilization off)
+- Kotlin/Java target 17
+- XREAL One Pro connected to phone
+- glasses set to `Follow` mode (stabilization off)
 
 ## Add the library
 
-### Source module (recommended)
+### Source module
 
 `settings.gradle.kts`
 
@@ -54,28 +35,23 @@ dependencies {
 }
 ```
 
-### Optional Maven artifact
-
-Coordinates:
+### Maven artifact (optional)
 
 ```kotlin
 implementation("io.onepro:oneproxr:<version>")
 ```
 
-Repo setup and auth are unchanged from README
-
 ## Required permissions
 
-The library manifest is intentionally empty, so the host app must declare:
+The library manifest is intentionally empty
+Your app must declare:
 
 ```xml
 <uses-permission android:name="android.permission.INTERNET" />
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 ```
 
-`ACCESS_NETWORK_STATE` is required because the client picks the correct Android `Network.socketFactory` for link-local routing
-
-## Quickstart
+## Quickstart (minimal)
 
 ```kotlin
 import android.Manifest
@@ -84,191 +60,141 @@ import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import io.onepro.xr.HeadTrackingControlChannel
-import io.onepro.xr.HeadTrackingStreamConfig
-import io.onepro.xr.HeadTrackingStreamEvent
 import io.onepro.xr.OneProXrClient
-import io.onepro.xr.OneProXrEndpoint
+import io.onepro.xr.XrPoseSnapshot
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class TrackingActivity : AppCompatActivity() {
-    private val endpoint = OneProXrEndpoint(host = "169.254.2.1", controlPort = 52999, streamPort = 52998)
-    private val controlChannel = HeadTrackingControlChannel()
     private lateinit var client: OneProXrClient
-    private var streamJob: Job? = null
-    private var calibrationComplete = false
+    private var poseJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        client = OneProXrClient(applicationContext, endpoint)
+        client = OneProXrClient(applicationContext)
     }
 
     @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     fun startTracking() {
-        if (streamJob != null) return
-        streamJob = lifecycleScope.launch {
-            client.streamHeadTracking(
-                HeadTrackingStreamConfig(
-                    diagnosticsIntervalSamples = 240,
-                    controlChannel = controlChannel
-                )
-            ).collect { event ->
-                when (event) {
-                    is HeadTrackingStreamEvent.Connected -> {
-                        Log.i("xr", "connected ${event.interfaceName} in ${event.connectMs}ms")
-                    }
-                    is HeadTrackingStreamEvent.CalibrationProgress -> {
-                        calibrationComplete = event.isComplete
-                    }
-                    is HeadTrackingStreamEvent.ReportAvailable -> {
-                        if (event.report.reportType.name == "MAGNETOMETER") {
-                            Log.d("xr", "mag mx=${event.report.mx} my=${event.report.my} mz=${event.report.mz}")
-                        }
-                    }
-                    is HeadTrackingStreamEvent.TrackingSampleAvailable -> {
-                        val rel = event.sample.relativeOrientation
-                        Log.d("xr", "rel pitch=${rel.pitch} yaw=${rel.yaw} roll=${rel.roll}")
-                    }
-                    is HeadTrackingStreamEvent.DiagnosticsAvailable -> {
-                        Log.d("xr", "imu=${event.diagnostics.imuReportCount} mag=${event.diagnostics.magnetometerReportCount}")
-                    }
-                    is HeadTrackingStreamEvent.StreamStopped -> {
-                        streamJob = null
-                    }
-                    is HeadTrackingStreamEvent.StreamError -> {
-                        Log.e("xr", "stream error ${event.error}")
-                        streamJob = null
+        if (client.isXrConnected()) return
+        lifecycleScope.launch {
+            try {
+                client.start()
+                poseJob?.cancel()
+                poseJob = launch {
+                    client.poseData.collect { pose ->
+                        if (pose == null) return@collect
+                        renderPose(pose)
                     }
                 }
+            } catch (t: Throwable) {
+                Log.e("xr", "start failed: ${t.message}")
             }
         }
     }
 
     fun zeroView() {
-        if (calibrationComplete) {
-            controlChannel.requestZeroView()
-        }
+        lifecycleScope.launch { client.zeroView() }
     }
 
     fun recalibrate() {
-        controlChannel.requestRecalibration()
-        calibrationComplete = false
+        lifecycleScope.launch { client.recalibrate() }
+    }
+
+    fun stopTracking() {
+        poseJob?.cancel()
+        poseJob = null
+        lifecycleScope.launch { client.stop() }
+    }
+
+    override fun onDestroy() {
+        stopTracking()
+        super.onDestroy()
+    }
+
+    private fun renderPose(pose: XrPoseSnapshot) {
+        val r = pose.relativeOrientation
+        Log.d("xr", "pitch=${r.pitch} yaw=${r.yaw} roll=${r.roll}")
     }
 }
 ```
 
-## API notes
+## If you need raw IMU/MAG data
 
-### `OneProXrClient`
-
-- `describeRouting()`
-- `connectControlChannel()`
-- `readSensorFrames()` (legacy low-level frame peek helper)
-- `captureStreamBytes()` (raw report-port capture for fixture generation)
-- `streamHeadTracking(config)`
-
-### `HeadTrackingStreamEvent`
-
-- `Connected`
-- `CalibrationProgress`
-- `ReportAvailable` (typed raw report payload)
-- `TrackingSampleAvailable` (orientation-first output)
-- `DiagnosticsAvailable`
-- `StreamStopped`
-- `StreamError`
-
-### `HeadTrackingSample`
-
-`HeadTrackingSample` intentionally stays orientation-focused and no longer exposes a raw sensor payload field
-Use `ReportAvailable` for raw IMU/magnetometer vectors and report metadata
-
-### Timing contract
-
-Tracking uses `hmd_time_nanos_device` from the decoded report
-
-- timestamps must be strictly monotonic for IMU tracking updates
-- non-monotonic/invalid deltas fail fast and surface through `StreamError`
-- no host-time fallback integration path
-
-## Diagnostics fields
-
-`HeadTrackingStreamDiagnostics` includes:
-
-- `parsedMessageCount`
-- `rejectedMessageCount`
-- `invalidReportLengthCount`
-- `decodeErrorCount`
-- `unknownReportTypeCount`
-- `imuReportCount`
-- `magnetometerReportCount`
-- receive-rate fields (`observedSampleRateHz`, `receiveDelta*Ms`)
-
-## Fixture capture and refresh workflow
-
-Phase 1 parser tests use this corpus:
-
-- `oneproxr/src/test/resources/packets/onepro_stream_capture_v1.bin`
-- `oneproxr/src/test/resources/packets/onepro_stream_capture_v1.meta.json`
-
-To refresh from a real device run:
-
-1. Open demo app and tap `Capture Fixture` (captures up to 45s, max 5 MiB)
-2. Pull files from device:
-
-```bash
-adb shell ls /sdcard/Android/data/io.onepro.xrprobe/files/onepro-fixtures
-adb pull /sdcard/Android/data/io.onepro.xrprobe/files/onepro-fixtures/<capture>.bin /tmp/onepro_stream_capture_v1.bin
-adb pull /sdcard/Android/data/io.onepro.xrprobe/files/onepro-fixtures/<capture>.meta.json /tmp/onepro_stream_capture_v1.meta.json
+```kotlin
+lifecycleScope.launch {
+    client.sensorData.collect { snapshot ->
+        if (snapshot == null) return@collect
+        snapshot.imu?.let { imu ->
+            Log.d("xr", "gyro=[${imu.gx}, ${imu.gy}, ${imu.gz}] accel=[${imu.ax}, ${imu.ay}, ${imu.az}]")
+        }
+        snapshot.magnetometer?.let { mag ->
+            Log.d("xr", "mag=[${mag.mx}, ${mag.my}, ${mag.mz}]")
+        }
+    }
+}
 ```
 
-3. Replace corpus files in repo
-4. Recompute checksum and update metadata fields if needed:
+## If you need diagnostics or raw reports
 
-```bash
-shasum -a 256 oneproxr/src/test/resources/packets/onepro_stream_capture_v1.bin
+```kotlin
+lifecycleScope.launch {
+    client.advanced.diagnostics.collect { d ->
+        if (d == null) return@collect
+        Log.d("xr", "imu=${d.imuReportCount} mag=${d.magnetometerReportCount} rejected=${d.rejectedMessageCount}")
+    }
+}
+
+lifecycleScope.launch {
+    client.advanced.reports.collect { report ->
+        Log.d("xr", "reportType=${report.reportType} timeNs=${report.hmdTimeNanosDevice}")
+    }
+}
 ```
 
-5. Validate:
+## API surface
 
-```bash
-./gradlew :oneproxr:testDebugUnitTest --tests "io.onepro.xr.OneProFixtureCorpusTest"
-```
+Simple API (`OneProXrClient`):
 
-Metadata contract fields:
+- `start()` / `stop()`
+- `isXrConnected()`
+- `getConnectionInfo()`
+- `sessionState`
+- `sensorData`
+- `poseData`
+- `zeroView()`
+- `recalibrate()`
 
-- `schema_version`
-- `captured_at_utc`
-- `duration_seconds`
-- `total_bytes`
-- `sha256`
-- `parser_contract_version`
+Advanced API (`client.advanced`):
+
+- `diagnostics`
+- `reports`
+
+## Important behavior
+
+- `start()` succeeds only after the first valid report is parsed
+- tracking time integration uses device timestamp (`hmd_time_nanos_device`) with fail-fast monotonic checks
+- `sensorData` is raw protocol field order
+- `poseData` uses compatibility accel mapping to preserve baseline demo behavior
 
 ## Troubleshooting
 
-### `No matching Android Network candidate for host 169.254.2.1`
+`No matching Android Network candidate for host 169.254.2.1`
 
-- Call `describeRouting()`
-- Confirm device link-local route is present
-- Keep default host unless your setup intentionally differs
+- call `describeRouting()`
+- verify link-local route is present
 
-### Stream connects but tracking does not start
+Startup timeout
 
-- Verify `Follow` mode
-- Keep glasses still until calibration completes
-- Watch diagnostics counters for parser rejects
+- confirm glasses mode is `Follow`
+- check `advanced.diagnostics`
 
-### Stream errors with timestamp contract messages
+`sessionState` becomes `Error`
 
-- This means IMU device timestamps were non-monotonic or invalid
-- Restart stream session and verify clean report traffic
+- inspect `code`, `message`, `causeType`
+- call `stop()` then `start()`
 
-## Validation checklist
+## Reference demo app
 
-- Manifest includes `INTERNET` + `ACCESS_NETWORK_STATE`
-- Stream reaches `Connected`
-- Calibration reaches complete
-- Orientation updates continuously via `TrackingSampleAvailable`
-- `ReportAvailable` shows IMU and magnetometer traffic
-- `Zero View` recenters tracking
-- `Recalibrate` returns stream to calibration and then tracking
+See `app/src/main/java/io/onepro/xrprobe/MainActivity.kt` for a complete app integration

@@ -12,7 +12,6 @@
     <string name="action_hide_logs">Hide Logs</string>
     <string name="action_zero_view">Zero View</string>
     <string name="action_recalibrate">Recalibrate</string>
-    <string name="action_capture_fixture">Capture Fixture</string>
     <string name="action_sensitivity_down">Sens -</string>
     <string name="action_sensitivity_up">Sens +</string>
     <string name="sensitivity_value">Sensitivity %.1f</string>

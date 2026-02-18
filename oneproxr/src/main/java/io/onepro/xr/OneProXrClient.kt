@@ -10,12 +10,29 @@ import java.io.InputStream
 import java.net.NetworkInterface
 import java.net.SocketTimeoutException
 import java.util.Collections
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
 
 class OneProXrClient(
@@ -27,6 +44,42 @@ class OneProXrClient(
         val interfaceName: String,
         val addresses: List<String>
     )
+
+    private val clientScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val runtimeMutex = Mutex()
+    private var streamJob: Job? = null
+    private var activeConnectionInfo: XrConnectionInfo? = null
+    private var activeControlChannel: HeadTrackingControlChannel? = null
+    private var latestImuSample: XrImuSample? = null
+    private var latestMagSample: XrMagSample? = null
+
+    private val _sessionState = MutableStateFlow<XrSessionState>(XrSessionState.Idle)
+    private val _sensorData = MutableStateFlow<XrSensorSnapshot?>(null)
+    private val _poseData = MutableStateFlow<XrPoseSnapshot?>(null)
+    private val _advancedDiagnostics = MutableStateFlow<HeadTrackingStreamDiagnostics?>(null)
+    private val _advancedReports = MutableSharedFlow<OneProReportMessage>(extraBufferCapacity = 256)
+
+    private val advancedApi = object : OneProXrAdvancedApi {
+        override val diagnostics: StateFlow<HeadTrackingStreamDiagnostics?>
+            get() = _advancedDiagnostics.asStateFlow()
+
+        override val reports: SharedFlow<OneProReportMessage>
+            get() = _advancedReports.asSharedFlow()
+    }
+
+    val sessionState: StateFlow<XrSessionState>
+        get() = _sessionState.asStateFlow()
+
+    val sensorData: StateFlow<XrSensorSnapshot?>
+        get() = _sensorData.asStateFlow()
+
+    val poseData: StateFlow<XrPoseSnapshot?>
+        get() = _poseData.asStateFlow()
+
+    val advanced: OneProXrAdvancedApi
+        get() = advancedApi
+
+    private val startupTimeoutMs = 3500L
 
     @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     suspend fun describeRouting(): RoutingSnapshot = withContext(Dispatchers.IO) {
@@ -44,6 +97,281 @@ class OneProXrClient(
             },
             addressCandidates = addressCandidates
         )
+    }
+
+    @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
+    suspend fun start(): XrConnectionInfo {
+        runtimeMutex.withLock {
+            if (streamJob?.isActive == true) {
+                return activeConnectionInfo ?: throw IllegalStateException("XR session is already starting")
+            }
+            activeConnectionInfo = null
+            activeControlChannel = null
+            latestImuSample = null
+            latestMagSample = null
+            _sensorData.value = null
+            _poseData.value = null
+            _advancedDiagnostics.value = null
+            _sessionState.value = XrSessionState.Connecting
+        }
+
+        val startupSignal = CompletableDeferred<XrConnectionInfo>()
+        val controlChannel = HeadTrackingControlChannel()
+        runtimeMutex.withLock {
+            activeControlChannel = controlChannel
+        }
+
+        val job = clientScope.launch {
+            try {
+                streamHeadTracking(
+                    config = HeadTrackingStreamConfig(
+                        diagnosticsIntervalSamples = 240,
+                        controlChannel = controlChannel
+                    )
+                ).collect { event ->
+                    handleRuntimeEvent(event, startupSignal)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (t: Throwable) {
+                handleRuntimeFailure(
+                    code = XrSessionErrorCode.STREAM_ERROR,
+                    message = "${t.javaClass.simpleName}:${t.message ?: "no-message"}",
+                    startupSignal = startupSignal
+                )
+            }
+        }
+
+        runtimeMutex.withLock {
+            streamJob = job
+        }
+
+        return try {
+            withTimeout(startupTimeoutMs) {
+                startupSignal.await()
+            }
+        } catch (_: TimeoutCancellationException) {
+            handleRuntimeFailure(
+                code = XrSessionErrorCode.STARTUP_TIMEOUT,
+                message = "Timed out waiting for first valid report during startup",
+                startupSignal = startupSignal
+            )
+            cancelRuntimeSession(awaitTermination = true)
+            throw IllegalStateException("Timed out waiting for first valid report during startup")
+        }
+    }
+
+    suspend fun stop() {
+        cancelRuntimeSession(awaitTermination = true)
+        _sessionState.value = XrSessionState.Stopped
+    }
+
+    fun isXrConnected(): Boolean {
+        val state = _sessionState.value
+        return state is XrSessionState.Calibrating || state is XrSessionState.Streaming
+    }
+
+    suspend fun getConnectionInfo(): XrConnectionInfo {
+        return runtimeMutex.withLock {
+            activeConnectionInfo ?: throw IllegalStateException("XR device is not connected")
+        }
+    }
+
+    suspend fun zeroView() {
+        val control = runtimeMutex.withLock { activeControlChannel }
+            ?: throw IllegalStateException("XR session is not running")
+        control.requestZeroView()
+    }
+
+    suspend fun recalibrate() {
+        val control = runtimeMutex.withLock { activeControlChannel }
+            ?: throw IllegalStateException("XR session is not running")
+        control.requestRecalibration()
+    }
+
+    suspend fun setSceneMode(mode: XrSceneMode) {
+        throw UnsupportedOperationException("setSceneMode is not available until Phase 2 control parity")
+    }
+
+    suspend fun setInputMode(mode: XrInputMode) {
+        throw UnsupportedOperationException("setInputMode is not available until Phase 2 control parity")
+    }
+
+    suspend fun setBrightness(level: Int) {
+        throw UnsupportedOperationException("setBrightness is not available until Phase 2 control parity")
+    }
+
+    suspend fun setDimmer(level: Int) {
+        throw UnsupportedOperationException("setDimmer is not available until Phase 2 control parity")
+    }
+
+    suspend fun getDisplayConfiguration(): XrDisplayConfiguration {
+        throw UnsupportedOperationException("getDisplayConfiguration is not available until Phase 2 control parity")
+    }
+
+    suspend fun setDisplayConfiguration(config: XrDisplayConfiguration) {
+        throw UnsupportedOperationException("setDisplayConfiguration is not available until Phase 2 control parity")
+    }
+
+    private suspend fun cancelRuntimeSession(awaitTermination: Boolean = false) {
+        val jobToCancel = runtimeMutex.withLock {
+            val active = streamJob
+            streamJob = null
+            activeConnectionInfo = null
+            activeControlChannel = null
+            latestImuSample = null
+            latestMagSample = null
+            active
+        }
+        if (awaitTermination) {
+            jobToCancel?.cancelAndJoin()
+        } else {
+            jobToCancel?.cancel()
+        }
+    }
+
+    private suspend fun handleRuntimeEvent(
+        event: HeadTrackingStreamEvent,
+        startupSignal: CompletableDeferred<XrConnectionInfo>
+    ) {
+        when (event) {
+            is HeadTrackingStreamEvent.Connected -> {
+                val info = XrConnectionInfo(
+                    networkHandle = event.networkHandle,
+                    interfaceName = event.interfaceName,
+                    localSocket = event.localSocket,
+                    remoteSocket = event.remoteSocket,
+                    connectMs = event.connectMs
+                )
+                runtimeMutex.withLock {
+                    activeConnectionInfo = info
+                }
+                _sessionState.value = XrSessionState.Calibrating(
+                    connectionInfo = info,
+                    calibrationSampleCount = 0,
+                    calibrationTarget = 0
+                )
+            }
+
+            is HeadTrackingStreamEvent.CalibrationProgress -> {
+                val info = runtimeMutex.withLock { activeConnectionInfo } ?: return
+                if (event.isComplete) {
+                    _sessionState.value = XrSessionState.Streaming(info)
+                } else {
+                    _sessionState.value = XrSessionState.Calibrating(
+                        connectionInfo = info,
+                        calibrationSampleCount = event.calibrationSampleCount,
+                        calibrationTarget = event.calibrationTarget
+                    )
+                }
+            }
+
+            is HeadTrackingStreamEvent.ReportAvailable -> {
+                _advancedReports.tryEmit(event.report)
+                val snapshot = runtimeMutex.withLock {
+                    when (event.report.reportType) {
+                        OneProReportType.IMU -> {
+                            latestImuSample = XrImuSample(
+                                gx = event.report.gx,
+                                gy = event.report.gy,
+                                gz = event.report.gz,
+                                ax = event.report.ax,
+                                ay = event.report.ay,
+                                az = event.report.az,
+                                deviceTimeNs = event.report.hmdTimeNanosDevice
+                            )
+                        }
+
+                        OneProReportType.MAGNETOMETER -> {
+                            latestMagSample = XrMagSample(
+                                mx = event.report.mx,
+                                my = event.report.my,
+                                mz = event.report.mz,
+                                deviceTimeNs = event.report.hmdTimeNanosDevice
+                            )
+                        }
+                    }
+                    XrSensorSnapshot(
+                        imu = latestImuSample,
+                        magnetometer = latestMagSample,
+                        deviceId = event.report.deviceId,
+                        temperatureCelsius = event.report.temperatureCelsius,
+                        frameId = event.report.frameId,
+                        imuId = event.report.imuId,
+                        reportType = event.report.reportType,
+                        imuDeviceTimeNs = latestImuSample?.deviceTimeNs,
+                        magDeviceTimeNs = latestMagSample?.deviceTimeNs,
+                        lastUpdatedSource = if (event.report.reportType == OneProReportType.IMU) {
+                            XrSensorUpdateSource.IMU
+                        } else {
+                            XrSensorUpdateSource.MAG
+                        }
+                    )
+                }
+                _sensorData.value = snapshot
+                if (!startupSignal.isCompleted) {
+                    val connection = runtimeMutex.withLock { activeConnectionInfo }
+                    if (connection != null) {
+                        startupSignal.complete(connection)
+                    }
+                }
+            }
+
+            is HeadTrackingStreamEvent.TrackingSampleAvailable -> {
+                _poseData.value = XrPoseSnapshot(
+                    relativeOrientation = event.sample.relativeOrientation,
+                    absoluteOrientation = event.sample.absoluteOrientation,
+                    isCalibrated = event.sample.isCalibrated,
+                    calibrationSampleCount = event.sample.calibrationSampleCount,
+                    calibrationTarget = event.sample.calibrationTarget,
+                    deltaTimeSeconds = event.sample.deltaTimeSeconds,
+                    sourceDeviceTimeNs = event.sample.sourceDeviceTimeNs
+                )
+                val info = runtimeMutex.withLock { activeConnectionInfo }
+                if (info != null && event.sample.isCalibrated) {
+                    _sessionState.value = XrSessionState.Streaming(info)
+                }
+            }
+
+            is HeadTrackingStreamEvent.DiagnosticsAvailable -> {
+                _advancedDiagnostics.value = event.diagnostics
+            }
+
+            is HeadTrackingStreamEvent.StreamStopped -> {
+                if (!startupSignal.isCompleted) {
+                    startupSignal.completeExceptionally(
+                        IllegalStateException("Stream stopped before startup completed: ${event.reason}")
+                    )
+                }
+                cancelRuntimeSession()
+                _sessionState.value = XrSessionState.Stopped
+            }
+
+            is HeadTrackingStreamEvent.StreamError -> {
+                handleRuntimeFailure(
+                    code = XrSessionErrorCode.STREAM_ERROR,
+                    message = event.error,
+                    startupSignal = startupSignal
+                )
+                cancelRuntimeSession()
+            }
+        }
+    }
+
+    private fun handleRuntimeFailure(
+        code: XrSessionErrorCode,
+        message: String,
+        startupSignal: CompletableDeferred<XrConnectionInfo>
+    ) {
+        _sessionState.value = XrSessionState.Error(
+            code = code,
+            message = message,
+            causeType = message.substringBefore(':').ifBlank { "Unknown" },
+            recoverable = true
+        )
+        if (!startupSignal.isCompleted) {
+            startupSignal.completeExceptionally(IllegalStateException(message))
+        }
     }
 
     @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
@@ -384,7 +712,7 @@ class OneProXrClient(
     }
 
     @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
-    fun streamHeadTracking(
+    internal fun streamHeadTracking(
         config: HeadTrackingStreamConfig = HeadTrackingStreamConfig()
     ): Flow<HeadTrackingStreamEvent> = flow {
         if (config.readChunkBytes <= 0) {
@@ -487,7 +815,7 @@ class OneProXrClient(
                             return@forEach
                         }
 
-                        val sensorSample = toSensorSample(report)
+                        val sensorSample = OneProTrackerSampleMapper.fromReport(report)
 
                         if (controlChannel.consumeRecalibrationRequest()) {
                             tracker.resetCalibration()
@@ -555,7 +883,8 @@ class OneProXrClient(
                                     relativeOrientation = update.relativeOrientation,
                                     calibrationSampleCount = tracker.calibrationCount,
                                     calibrationTarget = tracker.calibrationTarget,
-                                    isCalibrated = tracker.isCalibrated
+                                    isCalibrated = tracker.isCalibrated,
+                                    sourceDeviceTimeNs = report.hmdTimeNanosDevice
                                 )
                             )
                         )
@@ -587,17 +916,6 @@ class OneProXrClient(
             )
         }
     }.flowOn(Dispatchers.IO)
-
-    private fun toSensorSample(report: OneProReportMessage): OneProImuVectorSample {
-        return OneProImuVectorSample(
-            gx = report.gx,
-            gy = report.gy,
-            gz = report.gz,
-            ax = report.ax,
-            ay = report.ay,
-            az = report.az
-        )
-    }
 
     private fun shouldEmitCalibrationProgress(
         state: OneProCalibrationState,
