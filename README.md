@@ -58,16 +58,16 @@ adb shell am start -n io.onepro.xrprobe/.MainActivity
 4. Leave them still until the app shows `Calibration complete`
 5. Put the glasses on, face your neutral forward direction, then tap `Zero View`
 6. If tracking drifts later, tap `Recalibrate` and repeat the still-on-surface step
+7. Read the telemetry panel above the 3D view:
+   it shows parsed report counts (`imu`, `mag`, `rejected`, `dropped`), latest report metadata, and current orientation output
 
 ## Notes on Android implementation
 
-- Uses Android `Network.socketFactory` for reliable link-local routing.
-- Uses One Pro header + sensor marker framing (`283600000080`,
-  `273600000080`, `00401f000040`).
-- Uses One Pro IMU float mapping (`gx=v0`, `gy=v1`, `gz=v2`, `ax=v5`,
-  `ay=v4`, `az=v3`).
-- Uses complementary-filter tracking with startup gyro calibration,
-  zero-view, and recalibration support.
+- Uses Android `Network.socketFactory` for reliable link-local routing
+- Uses One Pro report framing (`magic + big-endian length`) with dual-header compatibility (`2836` and `2736`)
+- Parses full report payload parity fields (`device_id`, `hmd_time_nanos_device`, `report_type`, IMU vectors, magnetometer vectors, temperature, imu_id, frame_id)
+- Uses device timestamp (`hmd_time_nanos_device`) for tracking integration with fail-fast monotonicity checks
+- Uses complementary-filter tracking with startup gyro calibration, zero-view, and recalibration support
 
 ## Acknowledgement and reference demo patch
 

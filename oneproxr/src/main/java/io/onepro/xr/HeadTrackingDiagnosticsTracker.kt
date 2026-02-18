@@ -6,23 +6,25 @@ internal class HeadTrackingDiagnosticsTracker {
     private var trackingSampleCount = 0L
     private var parsedMessageCount = 0L
     private var droppedByteCount = 0L
-    private var tooShortMessageCount = 0L
-    private var missingSensorMarkerCount = 0L
-    private var invalidSensorSliceCount = 0L
-    private var floatDecodeFailureCount = 0L
+    private var invalidReportLengthCount = 0L
+    private var decodeErrorCount = 0L
+    private var unknownReportTypeCount = 0L
+    private var imuReportCount = 0L
+    private var magnetometerReportCount = 0L
 
     private var firstSampleCaptureNanos: Long? = null
     private var lastSampleCaptureNanos: Long? = null
     private var lastCaptureNanos: Long? = null
     private val receiveDeltaStats = RunningStats()
 
-    fun recordParserDelta(delta: OneProStreamMessageParser.ParseDiagnosticsDelta) {
+    fun recordParserDelta(delta: OneProReportMessageParser.ParseDiagnosticsDelta) {
         parsedMessageCount += delta.parsedMessageCount
         droppedByteCount += delta.droppedBytes
-        tooShortMessageCount += delta.tooShortMessageCount
-        missingSensorMarkerCount += delta.missingSensorMarkerCount
-        invalidSensorSliceCount += delta.invalidSensorSliceCount
-        floatDecodeFailureCount += delta.floatDecodeFailureCount
+        invalidReportLengthCount += delta.invalidReportLengthCount
+        decodeErrorCount += delta.decodeErrorCount
+        unknownReportTypeCount += delta.unknownReportTypeCount
+        imuReportCount += delta.imuReportCount
+        magnetometerReportCount += delta.magnetometerReportCount
     }
 
     fun recordTrackingSample(captureMonotonicNanos: Long) {
@@ -54,15 +56,13 @@ internal class HeadTrackingDiagnosticsTracker {
         return HeadTrackingStreamDiagnostics(
             trackingSampleCount = trackingSampleCount,
             parsedMessageCount = parsedMessageCount,
-            rejectedMessageCount = tooShortMessageCount +
-                missingSensorMarkerCount +
-                invalidSensorSliceCount +
-                floatDecodeFailureCount,
+            rejectedMessageCount = invalidReportLengthCount + decodeErrorCount + unknownReportTypeCount,
             droppedByteCount = droppedByteCount,
-            tooShortMessageCount = tooShortMessageCount,
-            missingSensorMarkerCount = missingSensorMarkerCount,
-            invalidSensorSliceCount = invalidSensorSliceCount,
-            floatDecodeFailureCount = floatDecodeFailureCount,
+            invalidReportLengthCount = invalidReportLengthCount,
+            decodeErrorCount = decodeErrorCount,
+            unknownReportTypeCount = unknownReportTypeCount,
+            imuReportCount = imuReportCount,
+            magnetometerReportCount = magnetometerReportCount,
             observedSampleRateHz = roundTo3(observedRate),
             receiveDeltaMinMs = roundTo3(receiveDeltaStats.min),
             receiveDeltaMaxMs = roundTo3(receiveDeltaStats.max),

@@ -9,8 +9,12 @@ import io.onepro.xr.HeadTrackingSample
 import io.onepro.xr.HeadTrackingStreamConfig
 import io.onepro.xr.HeadTrackingStreamDiagnostics
 import io.onepro.xr.HeadTrackingStreamEvent
-import io.onepro.xr.OneProXrEndpoint
+import io.onepro.xr.OneProReportMessage
+import io.onepro.xr.OneProReportType
 import io.onepro.xr.OneProXrClient
+import io.onepro.xr.OneProXrEndpoint
+import java.io.File
+import java.security.MessageDigest
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -27,9 +31,16 @@ class MainActivity : AppCompatActivity() {
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var testJob: Job? = null
+    private var captureJob: Job? = null
     private var logsVisible = false
     private var latestDiagnostics: HeadTrackingStreamDiagnostics? = null
+    private var latestImuReport: OneProReportMessage? = null
+    private var latestMagnetometerReport: OneProReportMessage? = null
+    private var latestTrackingSample: HeadTrackingSample? = null
     private var lastTelemetryUpdateNanos = 0L
+    private var lastImuReportLogNanos = 0L
+    private var lastMagReportLogNanos = 0L
+    private var lastOtherReportLogNanos = 0L
     private var controlChannel: HeadTrackingControlChannel? = null
     private var calibrationComplete = false
     private var cameraSensitivity = 1.0f
@@ -44,6 +55,7 @@ class MainActivity : AppCompatActivity() {
         binding.buttonViewLogs.setOnClickListener { setLogsVisible(!logsVisible) }
         binding.buttonZeroView.setOnClickListener { requestZeroView() }
         binding.buttonRecalibrate.setOnClickListener { requestRecalibration() }
+        binding.buttonCaptureFixture.setOnClickListener { startFixtureCapture() }
         binding.buttonSensitivityDown.setOnClickListener { adjustSensitivity(-0.1f) }
         binding.buttonSensitivityUp.setOnClickListener { adjustSensitivity(0.1f) }
 
@@ -66,12 +78,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         stopTest(updateStatus = false)
+        captureJob?.cancel()
+        captureJob = null
         uiScope.cancel()
         super.onDestroy()
     }
 
     private fun startTest() {
-        if (testJob?.isActive == true) {
+        if (testJob?.isActive == true || captureJob?.isActive == true) {
             return
         }
 
@@ -88,7 +102,13 @@ class MainActivity : AppCompatActivity() {
         controlChannel = control
 
         latestDiagnostics = null
+        latestImuReport = null
+        latestMagnetometerReport = null
+        latestTrackingSample = null
         lastTelemetryUpdateNanos = 0L
+        lastImuReportLogNanos = 0L
+        lastMagReportLogNanos = 0L
+        lastOtherReportLogNanos = 0L
         calibrationComplete = false
 
         binding.orientationView.resetCamera()
@@ -122,6 +142,76 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun startFixtureCapture() {
+        if (captureJob?.isActive == true || testJob?.isActive == true) {
+            appendLog("fixture capture ignored (stream test is running)")
+            return
+        }
+
+        val host = binding.inputHost.text.toString().trim()
+        val ports = parsePorts(binding.inputPorts.text.toString())
+        if (host.isEmpty()) {
+            appendLog("ERROR host is empty")
+            return
+        }
+
+        val endpoint = buildEndpoint(host, ports)
+        val client = OneProXrClient(applicationContext, endpoint)
+        val captureStartedAt = OffsetDateTime.now()
+        val captureStamp = captureStartedAt.format(DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmssX"))
+
+        appendLog("fixture capture start ${nowIso()} host=${endpoint.host} stream=${endpoint.streamPort}")
+        captureJob = uiScope.launch {
+            try {
+                val result = client.captureStreamBytes(
+                    durationSeconds = 45,
+                    maxCaptureBytes = 5 * 1024 * 1024,
+                    readChunkBytes = 4096
+                )
+                if (!result.success) {
+                    appendLog("fixture capture failed status=${result.readStatus} error=${result.error}")
+                    return@launch
+                }
+
+                val baseDir = getExternalFilesDir(null) ?: cacheDir
+                val captureDir = File(baseDir, "onepro-fixtures")
+                if (!captureDir.exists()) {
+                    captureDir.mkdirs()
+                }
+                val baseName = "onepro_stream_capture_$captureStamp"
+                val binFile = File(captureDir, "$baseName.bin")
+                val metaFile = File(captureDir, "$baseName.meta.json")
+                binFile.writeBytes(result.payload)
+
+                val checksum = sha256Hex(result.payload)
+                val metadata = """
+                    {
+                      "schema_version": "onepro_stream_fixture.v1",
+                      "captured_at_utc": "${captureStartedAt.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)}",
+                      "duration_seconds": ${result.durationMs.toDouble() / 1000.0},
+                      "total_bytes": ${result.totalBytes},
+                      "sha256": "$checksum",
+                      "parser_contract_version": "phase1-report-v1"
+                    }
+                """.trimIndent()
+                metaFile.writeText(metadata)
+
+                appendLog("fixture capture saved bytes=${result.totalBytes} durationMs=${result.durationMs} status=${result.readStatus}")
+                appendLog("fixture bin=${binFile.absolutePath}")
+                appendLog("fixture meta=${metaFile.absolutePath}")
+                appendLog("fixture sha256=$checksum")
+            } catch (_: CancellationException) {
+                appendLog("fixture capture cancelled")
+            } catch (t: Throwable) {
+                appendLog("fixture capture error ${t.javaClass.simpleName}:${t.message ?: "no-message"}")
+            } finally {
+                captureJob = null
+                setRunningState(testJob?.isActive == true)
+            }
+        }
+        setRunningState(false)
+    }
+
     private fun stopTest(updateStatus: Boolean) {
         testJob?.cancel()
         testJob = null
@@ -136,13 +226,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setRunningState(running: Boolean) {
-        binding.buttonStartTest.isEnabled = !running
+        val capturing = captureJob?.isActive == true
+        binding.buttonStartTest.isEnabled = !running && !capturing
         binding.buttonStopTest.isEnabled = running
         binding.buttonRecalibrate.isEnabled = running
         binding.buttonSensitivityDown.isEnabled = running
         binding.buttonSensitivityUp.isEnabled = running
-        binding.inputHost.isEnabled = !running
-        binding.inputPorts.isEnabled = !running
+        binding.buttonCaptureFixture.isEnabled = !running && !capturing
+        binding.inputHost.isEnabled = !running && !capturing
+        binding.inputPorts.isEnabled = !running && !capturing
         binding.buttonZeroView.isEnabled = running && calibrationComplete
     }
 
@@ -221,8 +313,18 @@ class MainActivity : AppCompatActivity() {
                 setRunningState(true)
             }
 
+            is HeadTrackingStreamEvent.ReportAvailable -> {
+                when (event.report.reportType) {
+                    OneProReportType.IMU -> latestImuReport = event.report
+                    OneProReportType.MAGNETOMETER -> latestMagnetometerReport = event.report
+                }
+                maybeLogReport(event.report)
+                latestTrackingSample?.let { maybeRenderTelemetry(it) }
+            }
+
             is HeadTrackingStreamEvent.TrackingSampleAvailable -> {
                 calibrationComplete = event.sample.isCalibrated
+                latestTrackingSample = event.sample
                 binding.orientationView.updateRelativeOrientation(event.sample.relativeOrientation)
                 maybeRenderTelemetry(event.sample)
                 if (!binding.buttonZeroView.isEnabled) {
@@ -254,6 +356,38 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun maybeLogReport(report: OneProReportMessage) {
+        val nowNanos = System.nanoTime()
+        when (report.reportType) {
+            OneProReportType.IMU -> {
+                if (nowNanos - lastImuReportLogNanos < 500_000_000L) {
+                    return
+                }
+                lastImuReportLogNanos = nowNanos
+                appendLog(
+                    "[XR][IMU] deviceTimeNs=${report.hmdTimeNanosDevice} frame=${report.frameId.asUInt24LittleEndian} imuId=${report.imuId} tempC=${report.temperatureCelsius.toDisplay()} gyro=[${report.gx.toDisplay()},${report.gy.toDisplay()},${report.gz.toDisplay()}] accel=[${report.ax.toDisplay()},${report.ay.toDisplay()},${report.az.toDisplay()}]"
+                )
+            }
+
+            OneProReportType.MAGNETOMETER -> {
+                if (nowNanos - lastMagReportLogNanos < 500_000_000L) {
+                    return
+                }
+                lastMagReportLogNanos = nowNanos
+                appendLog(
+                    "[XR][MAG] deviceTimeNs=${report.hmdTimeNanosDevice} frame=${report.frameId.asUInt24LittleEndian} imuId=${report.imuId} tempC=${report.temperatureCelsius.toDisplay()} mag=[${report.mx.toDisplay()},${report.my.toDisplay()},${report.mz.toDisplay()}]"
+                )
+            }
+        }
+        if (nowNanos - lastOtherReportLogNanos < 1_500_000_000L) {
+            return
+        }
+        lastOtherReportLogNanos = nowNanos
+        appendLog(
+            "[XR][OTHER] reportType=${report.reportType} deviceId=${report.deviceId} deviceTimeNs=${report.hmdTimeNanosDevice} frame=${report.frameId.asUInt24LittleEndian} imuId=${report.imuId} tempC=${report.temperatureCelsius.toDisplay()}"
+        )
+    }
+
     private fun maybeRenderTelemetry(sample: HeadTrackingSample) {
         val nowNanos = System.nanoTime()
         if (nowNanos - lastTelemetryUpdateNanos < 50_000_000L) {
@@ -261,21 +395,24 @@ class MainActivity : AppCompatActivity() {
         }
         lastTelemetryUpdateNanos = nowNanos
 
-        val diagnostics = latestDiagnostics
-        val sampleRate = diagnostics?.observedSampleRateHz?.toDisplay()
-        binding.textTelemetry.text = getString(
-            R.string.telemetry_format,
-            sample.sampleIndex,
-            sampleRate,
-            sample.relativeOrientation.pitch,
-            sample.relativeOrientation.yaw,
-            sample.relativeOrientation.roll,
-            sample.absoluteOrientation.pitch,
-            sample.absoluteOrientation.yaw,
-            sample.absoluteOrientation.roll,
-            sample.deltaTimeSeconds * 1000.0f,
-            cameraSensitivity
-        )
+        val imu = latestImuReport
+        val mag = latestMagnetometerReport
+        val gyroLine = if (imu == null) {
+            "gyroscope: [n/a, n/a, n/a]"
+        } else {
+            "gyroscope: [${imu.gx.toDisplay()}, ${imu.gy.toDisplay()}, ${imu.gz.toDisplay()}]"
+        }
+        val accelLine = if (imu == null) {
+            "accelerometer: [n/a, n/a, n/a]"
+        } else {
+            "accelerometer: [${imu.ax.toDisplay()}, ${imu.ay.toDisplay()}, ${imu.az.toDisplay()}]"
+        }
+        val magLine = if (mag == null) {
+            "magnetometer: [n/a, n/a, n/a]"
+        } else {
+            "magnetometer: [${mag.mx.toDisplay()}, ${mag.my.toDisplay()}, ${mag.mz.toDisplay()}]"
+        }
+        binding.textTelemetry.text = listOf(gyroLine, accelLine, magLine).joinToString("\n")
     }
 
     private fun formatStatus(diagnostics: HeadTrackingStreamDiagnostics): String {
@@ -285,12 +422,14 @@ class MainActivity : AppCompatActivity() {
             diagnostics.observedSampleRateHz.toDisplay(),
             diagnostics.receiveDeltaAvgMs.toDisplay(),
             diagnostics.droppedByteCount,
-            diagnostics.rejectedMessageCount
+            diagnostics.rejectedMessageCount,
+            diagnostics.imuReportCount,
+            diagnostics.magnetometerReportCount
         )
     }
 
     private fun formatDiagnostics(diagnostics: HeadTrackingStreamDiagnostics): String {
-        return "diag samples=${diagnostics.trackingSampleCount} parsed=${diagnostics.parsedMessageCount} rejected=${diagnostics.rejectedMessageCount} dropped=${diagnostics.droppedByteCount} hz=${diagnostics.observedSampleRateHz.toDisplay()} rxMs[min=${diagnostics.receiveDeltaMinMs.toDisplay()},avg=${diagnostics.receiveDeltaAvgMs.toDisplay()},max=${diagnostics.receiveDeltaMaxMs.toDisplay()}] rejectBreakdown[short=${diagnostics.tooShortMessageCount},marker=${diagnostics.missingSensorMarkerCount},slice=${diagnostics.invalidSensorSliceCount},float=${diagnostics.floatDecodeFailureCount}]"
+        return "diag parser parsed=${diagnostics.parsedMessageCount} imu=${diagnostics.imuReportCount} mag=${diagnostics.magnetometerReportCount} rejected=${diagnostics.rejectedMessageCount} dropped=${diagnostics.droppedByteCount} rejectBreakdown[length=${diagnostics.invalidReportLengthCount},decode=${diagnostics.decodeErrorCount},type=${diagnostics.unknownReportTypeCount}] trackingHz=${diagnostics.observedSampleRateHz.toDisplay()} rxMs[min=${diagnostics.receiveDeltaMinMs.toDisplay()},avg=${diagnostics.receiveDeltaAvgMs.toDisplay()},max=${diagnostics.receiveDeltaMaxMs.toDisplay()}]"
     }
 
     private fun setLogsVisible(visible: Boolean) {
@@ -335,7 +474,22 @@ class MainActivity : AppCompatActivity() {
         return String.format(Locale.US, "%.1f", cameraSensitivity)
     }
 
+    private fun sha256Hex(bytes: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+        val out = StringBuilder(digest.size * 2)
+        digest.forEach { value ->
+            val v = value.toInt() and 0xFF
+            out.append((v ushr 4).toString(16))
+            out.append((v and 0x0F).toString(16))
+        }
+        return out.toString()
+    }
+
     private fun Double?.toDisplay(): String {
         return this?.let { String.format(Locale.US, "%.3f", it) } ?: "n/a"
+    }
+
+    private fun Float.toDisplay(): String {
+        return String.format(Locale.US, "%.3f", this)
     }
 }

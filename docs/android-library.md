@@ -1,45 +1,52 @@
 # Android Library Guide (`oneproxr`)
 
-This guide is for Android developers who want live XREAL One Pro head tracking without the Unity-based XREAL SDK
+This library gives Android apps direct access to XREAL One Pro report data and head tracking without the Unity-based XREAL SDK
 
 ## What this library provides
 
-- TCP connectivity helpers for the One Pro control and IMU endpoints
-- Real-time IMU parsing for One Pro stream frames
-- A coroutine `Flow` API that emits calibration status, tracking samples, diagnostics, and errors
-- Control hooks for `Zero View` and full recalibration while the stream is active
+- Link-local TCP routing helpers for One Pro control/report ports
+- Full typed decode of One Pro report payload fields:
+  - `device_id`
+  - `hmd_time_nanos_device`
+  - `report_type`
+  - `gx/gy/gz`
+  - `ax/ay/az`
+  - `mx/my/mz`
+  - `temperature`
+  - `imu_id`
+  - `frame_id`
+- A simple tracking flow for most apps (`streamHeadTracking`) with calibration + zero view
+- Advanced raw report access through `HeadTrackingStreamEvent.ReportAvailable`
+- Stream diagnostics counters for report routing and parser health
+- A capture helper (`captureStreamBytes`) for fixture generation and parser regression tests
 
 ## Current scope
 
 - Target device: XREAL One Pro
-- Transport: direct TCP to One Pro endpoints (default host `169.254.2.1`)
-- Output: orientation in degrees (`pitch`, `yaw`, `roll`) as absolute and relative views
-- This library does not handle rendering, scene/camera management, or UI controls for you
+- Transport: direct TCP (`169.254.2.1` by default)
+- Tracking output: orientation in degrees (`pitch`, `yaw`, `roll`)
+- Rendering/scene management stays in your app
 
 ## Prerequisites
 
-- Android `minSdk 26` or newer
-- Android `compileSdk 35` or newer
-- Java 17 / Kotlin JVM target 17
-- Kotlin coroutines in your app module
-- XREAL One Pro connected and reachable from the phone
-- Glasses mode set to `Follow` (stabilization off) for expected behavior
+- Android `minSdk 26`
+- Android `compileSdk 35`
+- Java/Kotlin target 17
+- Coroutines in your app module
+- XREAL One Pro connected and reachable from phone
+- Glasses mode set to `Follow` (stabilization off)
 
-## Add the library to your app
-
-For most users, source-module integration is the fastest path
+## Add the library
 
 ### Source module (recommended)
 
-Pull `oneproxr/` into your project and wire it as a local module
-
-`settings.gradle.kts`:
+`settings.gradle.kts`
 
 ```kotlin
 include(":app", ":oneproxr")
 ```
 
-`app/build.gradle.kts`:
+`app/build.gradle.kts`
 
 ```kotlin
 dependencies {
@@ -47,66 +54,28 @@ dependencies {
 }
 ```
 
-### Optional: Maven artifact
+### Optional Maven artifact
 
-If you want package-based integration, this repo also publishes
-`io.onepro:oneproxr` to GitHub Packages
-
-1. Add credentials to `~/.gradle/gradle.properties`
-
-```properties
-gpr.user=YOUR_GITHUB_USERNAME
-gpr.key=YOUR_GITHUB_READ_PACKAGES_TOKEN
-```
-
-2. Add the package repository in your project `settings.gradle.kts`
+Coordinates:
 
 ```kotlin
-dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-    repositories {
-        google()
-        mavenCentral()
-        maven {
-            url = uri("https://maven.pkg.github.com/nskaria/one-pro-imu")
-            credentials {
-                username = providers.gradleProperty("gpr.user").orNull
-                password = providers.gradleProperty("gpr.key").orNull
-            }
-        }
-    }
-}
+implementation("io.onepro:oneproxr:<version>")
 ```
 
-3. Add the dependency in `app/build.gradle.kts`
-
-```kotlin
-dependencies {
-    implementation("io.onepro:oneproxr:<version>")
-}
-```
-
-Use a GitHub token with `read:packages` scope for consumption from local
-machines or other repositories
+Repo setup and auth are unchanged from README
 
 ## Required permissions
 
-The library manifest is intentionally empty, so the host app must declare required permissions
-
-`app/src/main/AndroidManifest.xml`:
+The library manifest is intentionally empty, so the host app must declare:
 
 ```xml
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-</manifest>
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 ```
 
-`ACCESS_NETWORK_STATE` is required because `OneProXrClient` selects the right `Network.socketFactory` for link-local routing
+`ACCESS_NETWORK_STATE` is required because the client picks the correct Android `Network.socketFactory` for link-local routing
 
-## Quickstart integration
-
-This is a minimal Activity-style integration that starts/stops streaming and handles the core events
+## Quickstart
 
 ```kotlin
 import android.Manifest
@@ -124,11 +93,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class TrackingActivity : AppCompatActivity() {
-    private val endpoint = OneProXrEndpoint(
-        host = "169.254.2.1",
-        controlPort = 52999,
-        streamPort = 52998
-    )
+    private val endpoint = OneProXrEndpoint(host = "169.254.2.1", controlPort = 52999, streamPort = 52998)
     private val controlChannel = HeadTrackingControlChannel()
     private lateinit var client: OneProXrClient
     private var streamJob: Job? = null
@@ -151,36 +116,33 @@ class TrackingActivity : AppCompatActivity() {
             ).collect { event ->
                 when (event) {
                     is HeadTrackingStreamEvent.Connected -> {
-                        Log.i("imu", "connected ${event.interfaceName} in ${event.connectMs}ms")
+                        Log.i("xr", "connected ${event.interfaceName} in ${event.connectMs}ms")
                     }
                     is HeadTrackingStreamEvent.CalibrationProgress -> {
                         calibrationComplete = event.isComplete
-                        Log.i("imu", "calibration ${event.calibrationSampleCount}/${event.calibrationTarget}")
+                    }
+                    is HeadTrackingStreamEvent.ReportAvailable -> {
+                        if (event.report.reportType.name == "MAGNETOMETER") {
+                            Log.d("xr", "mag mx=${event.report.mx} my=${event.report.my} mz=${event.report.mz}")
+                        }
                     }
                     is HeadTrackingStreamEvent.TrackingSampleAvailable -> {
-                        val orientation = event.sample.relativeOrientation
-                        Log.i("imu", "relative pitch=${orientation.pitch} yaw=${orientation.yaw} roll=${orientation.roll}")
+                        val rel = event.sample.relativeOrientation
+                        Log.d("xr", "rel pitch=${rel.pitch} yaw=${rel.yaw} roll=${rel.roll}")
                     }
                     is HeadTrackingStreamEvent.DiagnosticsAvailable -> {
-                        Log.d("imu", "sampleRateHz=${event.diagnostics.observedSampleRateHz}")
+                        Log.d("xr", "imu=${event.diagnostics.imuReportCount} mag=${event.diagnostics.magnetometerReportCount}")
                     }
                     is HeadTrackingStreamEvent.StreamStopped -> {
-                        Log.i("imu", "stopped: ${event.reason}")
                         streamJob = null
                     }
                     is HeadTrackingStreamEvent.StreamError -> {
-                        Log.e("imu", "error: ${event.error}")
+                        Log.e("xr", "stream error ${event.error}")
                         streamJob = null
                     }
                 }
             }
         }
-    }
-
-    fun stopTracking() {
-        streamJob?.cancel()
-        streamJob = null
-        calibrationComplete = false
     }
 
     fun zeroView() {
@@ -196,85 +158,117 @@ class TrackingActivity : AppCompatActivity() {
 }
 ```
 
-## Recommended first-run flow in your app
-
-1. Connect XREAL One Pro and switch glasses mode to `Follow`
-2. Start tracking while glasses are resting still on a table
-3. Wait for `CalibrationProgress(isComplete = true)`
-4. Put glasses on and call `requestZeroView()` once the user faces forward
-5. Expose a `Recalibrate` action that calls `requestRecalibration()`
-
-If users call `Zero View` before calibration is complete, your app should ignore or defer it
-
-## API guide
+## API notes
 
 ### `OneProXrClient`
 
-- `describeRouting()`: inspects active interfaces and Android network candidates
-- `connectControlChannel()`: quick control-socket connectivity check
-- `readSensorFrames()`: short raw frame read helper for diagnostics
-- `streamHeadTracking(config)`: primary streaming API for production use
-
-`streamHeadTracking` is a cold flow. Every collection starts a new socket session
-
-### `HeadTrackingStreamConfig`
-
-Most apps can keep defaults. If you tune values, these are the high-impact fields:
-
-- `calibrationSampleTarget`: number of still samples required before tracking starts
-- `diagnosticsIntervalSamples`: diagnostics emission cadence
-- `complementaryFilterAlpha`: gyro vs accelerometer blend
-- `pitchScale`, `yawScale`, `rollScale`: relative output sensitivity
-- `controlChannel`: command channel for `requestZeroView()` and `requestRecalibration()`
+- `describeRouting()`
+- `connectControlChannel()`
+- `readSensorFrames()` (legacy low-level frame peek helper)
+- `captureStreamBytes()` (raw report-port capture for fixture generation)
+- `streamHeadTracking(config)`
 
 ### `HeadTrackingStreamEvent`
 
-- `Connected`: socket established and stream is ready
-- `CalibrationProgress`: startup/recalibration state
-- `TrackingSampleAvailable`: per-sample orientation and IMU payload
-- `DiagnosticsAvailable`: parser/rate counters for health monitoring
-- `StreamStopped`: clean stop with reason
-- `StreamError`: failure message suitable for logs and user-facing diagnostics
+- `Connected`
+- `CalibrationProgress`
+- `ReportAvailable` (typed raw report payload)
+- `TrackingSampleAvailable` (orientation-first output)
+- `DiagnosticsAvailable`
+- `StreamStopped`
+- `StreamError`
 
 ### `HeadTrackingSample`
 
-- `absoluteOrientation`: filter output in world frame
-- `relativeOrientation`: user-zeroed view after `Zero View` offsets
-- `deltaTimeSeconds`: effective integration timestep for this sample
-- `isCalibrated`: true only after gyro bias calibration completes
+`HeadTrackingSample` intentionally stays orientation-focused and no longer exposes a raw sensor payload field
+Use `ReportAvailable` for raw IMU/magnetometer vectors and report metadata
 
-All orientation values are degrees, normalized to roughly `[-180, 180]`
+### Timing contract
+
+Tracking uses `hmd_time_nanos_device` from the decoded report
+
+- timestamps must be strictly monotonic for IMU tracking updates
+- non-monotonic/invalid deltas fail fast and surface through `StreamError`
+- no host-time fallback integration path
+
+## Diagnostics fields
+
+`HeadTrackingStreamDiagnostics` includes:
+
+- `parsedMessageCount`
+- `rejectedMessageCount`
+- `invalidReportLengthCount`
+- `decodeErrorCount`
+- `unknownReportTypeCount`
+- `imuReportCount`
+- `magnetometerReportCount`
+- receive-rate fields (`observedSampleRateHz`, `receiveDelta*Ms`)
+
+## Fixture capture and refresh workflow
+
+Phase 1 parser tests use this corpus:
+
+- `oneproxr/src/test/resources/packets/onepro_stream_capture_v1.bin`
+- `oneproxr/src/test/resources/packets/onepro_stream_capture_v1.meta.json`
+
+To refresh from a real device run:
+
+1. Open demo app and tap `Capture Fixture` (captures up to 45s, max 5 MiB)
+2. Pull files from device:
+
+```bash
+adb shell ls /sdcard/Android/data/io.onepro.xrprobe/files/onepro-fixtures
+adb pull /sdcard/Android/data/io.onepro.xrprobe/files/onepro-fixtures/<capture>.bin /tmp/onepro_stream_capture_v1.bin
+adb pull /sdcard/Android/data/io.onepro.xrprobe/files/onepro-fixtures/<capture>.meta.json /tmp/onepro_stream_capture_v1.meta.json
+```
+
+3. Replace corpus files in repo
+4. Recompute checksum and update metadata fields if needed:
+
+```bash
+shasum -a 256 oneproxr/src/test/resources/packets/onepro_stream_capture_v1.bin
+```
+
+5. Validate:
+
+```bash
+./gradlew :oneproxr:testDebugUnitTest --tests "io.onepro.xr.OneProFixtureCorpusTest"
+```
+
+Metadata contract fields:
+
+- `schema_version`
+- `captured_at_utc`
+- `duration_seconds`
+- `total_bytes`
+- `sha256`
+- `parser_contract_version`
 
 ## Troubleshooting
 
 ### `No matching Android Network candidate for host 169.254.2.1`
 
-- Call `describeRouting()` and inspect `networkCandidates`
-- Confirm glasses are connected and Android has an active link-local route
-- Keep endpoint host at `169.254.2.1` unless your setup is intentionally different
+- Call `describeRouting()`
+- Confirm device link-local route is present
+- Keep default host unless your setup intentionally differs
 
-### Stream connects but no useful tracking samples
+### Stream connects but tracking does not start
 
-- Make sure glasses are in `Follow` mode
-- Keep glasses completely still during calibration
-- Do not treat the stream as ready until calibration completion is emitted
+- Verify `Follow` mode
+- Keep glasses still until calibration completes
+- Watch diagnostics counters for parser rejects
 
-### Tracking drifts or feels offset
+### Stream errors with timestamp contract messages
 
-- Expose a user action for `requestRecalibration()`
-- Recalibrate with glasses resting still on a surface
-- After calibration, call `requestZeroView()` when user faces neutral forward
-
-### Stream ends with timeout/eof on unstable links
-
-- Retry by restarting the flow collection
-- Log `DiagnosticsAvailable` sample-rate fields to spot transport instability
+- This means IMU device timestamps were non-monotonic or invalid
+- Restart stream session and verify clean report traffic
 
 ## Validation checklist
 
-- App manifest includes both `INTERNET` and `ACCESS_NETWORK_STATE`
+- Manifest includes `INTERNET` + `ACCESS_NETWORK_STATE`
 - Stream reaches `Connected`
-- Calibration reaches complete while glasses are still
-- `TrackingSampleAvailable` events update orientation continuously
-- `Zero View` recenters orientation
-- `Recalibrate` resets calibration and returns to tracking after still-surface step
+- Calibration reaches complete
+- Orientation updates continuously via `TrackingSampleAvailable`
+- `ReportAvailable` shows IMU and magnetometer traffic
+- `Zero View` recenters tracking
+- `Recalibrate` returns stream to calibration and then tracking

@@ -3,6 +3,15 @@ package io.onepro.xr
 import kotlin.math.atan2
 import kotlin.math.sqrt
 
+internal data class OneProImuVectorSample(
+    val gx: Float,
+    val gy: Float,
+    val gz: Float,
+    val ax: Float,
+    val ay: Float,
+    val az: Float
+)
+
 internal data class OneProHeadTrackerConfig(
     val calibrationSampleTarget: Int,
     val complementaryFilterAlpha: Float,
@@ -56,9 +65,9 @@ internal class OneProHeadTracker(
     private var zeroYaw = 0.0f
     private var zeroRoll = 0.0f
 
-    private var lastTimestampNanos: Long? = null
+    private var lastDeviceTimestampNanos: ULong? = null
 
-    fun calibrateGyroscope(sensorSample: OneProSensorSample): OneProCalibrationState {
+    fun calibrateGyroscope(sensorSample: OneProImuVectorSample): OneProCalibrationState {
         if (isCalibrated) {
             return calibrationState()
         }
@@ -77,7 +86,7 @@ internal class OneProHeadTracker(
             pitch = 0.0f
             yaw = 0.0f
             roll = 0.0f
-            lastTimestampNanos = null
+            lastDeviceTimestampNanos = null
         }
 
         return calibrationState()
@@ -98,7 +107,7 @@ internal class OneProHeadTracker(
         zeroPitch = 0.0f
         zeroYaw = 0.0f
         zeroRoll = 0.0f
-        lastTimestampNanos = null
+        lastDeviceTimestampNanos = null
     }
 
     fun zeroView() {
@@ -124,26 +133,22 @@ internal class OneProHeadTracker(
     }
 
     fun update(
-        sensorSample: OneProSensorSample,
-        timestampNanos: Long,
-        fallbackDeltaSeconds: Float,
-        maxDeltaSeconds: Float
+        sensorSample: OneProImuVectorSample,
+        deviceTimestampNanos: ULong
     ): OneProTrackingUpdate? {
         if (!isCalibrated) {
             return null
         }
 
-        val previousTimestamp = lastTimestampNanos
+        val previousTimestamp = lastDeviceTimestampNanos
         if (previousTimestamp == null) {
-            lastTimestampNanos = timestampNanos
+            lastDeviceTimestampNanos = deviceTimestampNanos
             return null
         }
 
         val deltaTimeSeconds = resolveDeltaTimeSeconds(
             previousTimestampNanos = previousTimestamp,
-            currentTimestampNanos = timestampNanos,
-            fallbackSeconds = fallbackDeltaSeconds,
-            maxSeconds = maxDeltaSeconds
+            currentTimestampNanos = deviceTimestampNanos
         )
 
         val gyroX = sensorSample.gx - gyroBiasX
@@ -183,7 +188,7 @@ internal class OneProHeadTracker(
         pitch = wrapAngle(pitch)
         yaw = wrapAngle(yaw)
         roll = wrapAngle(roll)
-        lastTimestampNanos = timestampNanos
+        lastDeviceTimestampNanos = deviceTimestampNanos
 
         val absolute = HeadOrientationDegrees(
             pitch = pitch,
@@ -209,21 +214,21 @@ internal class OneProHeadTracker(
     }
 
     private fun resolveDeltaTimeSeconds(
-        previousTimestampNanos: Long,
-        currentTimestampNanos: Long,
-        fallbackSeconds: Float,
-        maxSeconds: Float
+        previousTimestampNanos: ULong,
+        currentTimestampNanos: ULong
     ): Float {
-        val safeFallback = fallbackSeconds.coerceAtLeast(0.0001f)
-        val safeMax = maxSeconds.coerceAtLeast(safeFallback)
-        val deltaNanos = currentTimestampNanos - previousTimestampNanos
-        if (deltaNanos <= 0L) {
-            return safeFallback
+        if (currentTimestampNanos <= previousTimestampNanos) {
+            throw IllegalStateException(
+                "Device timestamp is non-monotonic (previous=$previousTimestampNanos current=$currentTimestampNanos)"
+            )
         }
+        val deltaNanos = currentTimestampNanos - previousTimestampNanos
         val deltaSeconds = deltaNanos.toDouble() / 1_000_000_000.0
         if (!deltaSeconds.isFinite() || deltaSeconds <= 0.0) {
-            return safeFallback
+            throw IllegalStateException(
+                "Device timestamp produced invalid delta seconds (previous=$previousTimestampNanos current=$currentTimestampNanos)"
+            )
         }
-        return deltaSeconds.toFloat().coerceAtMost(safeMax)
+        return deltaSeconds.toFloat()
     }
 }

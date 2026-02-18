@@ -1,0 +1,8 @@
+{
+  "schema_version": "onepro_stream_fixture.v1",
+  "captured_at_utc": "2026-02-18T16:52:02.284417+01:00",
+  "duration_seconds": 27.948,
+  "total_bytes": 5242880,
+  "sha256": "2acf9849f4f08ad1cc4ae5fd9649db9f34377ff7b6cd871d752c33b111bf1cbc",
+  "parser_contract_version": "phase1-report-v1"
+}

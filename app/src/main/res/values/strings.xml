@@ -12,6 +12,7 @@
     <string name="action_hide_logs">Hide Logs</string>
     <string name="action_zero_view">Zero View</string>
     <string name="action_recalibrate">Recalibrate</string>
+    <string name="action_capture_fixture">Capture Fixture</string>
     <string name="action_sensitivity_down">Sens -</string>
     <string name="action_sensitivity_up">Sens +</string>
     <string name="sensitivity_value">Sensitivity %.1f</string>
@@ -22,9 +23,8 @@
     <string name="status_calibrating">Calibrating %1$.1f%% (%2$d/%3$d)</string>
     <string name="status_calibration_complete">Calibration complete</string>
     <string name="status_stopped">Stopped</string>
-    <string name="status_streaming">Tracking samples=%1$d hz=%2$s rxAvgMs=%3$s dropped=%4$d rejected=%5$d</string>
+    <string name="status_streaming">Tracking samples=%1$d hz=%2$s rxAvgMs=%3$s dropped=%4$d rejected=%5$d imu=%6$d mag=%7$d</string>
     <string name="status_stream_stopped">Stream stopped: %1$s</string>
     <string name="status_stream_error">Stream error: %1$s</string>
-    <string name="telemetry_placeholder">Telemetry unavailable</string>
-    <string name="telemetry_format">sample=%1$d hz=%2$s rel[p=%3$.1f y=%4$.1f r=%5$.1f] abs[p=%6$.1f y=%7$.1f r=%8$.1f] dtMs=%9$.3f sens=%10$.1f</string>
+    <string name="telemetry_placeholder">Telemetry unavailable (start stream to view IMU/MAG/report details)</string>
 </resources>

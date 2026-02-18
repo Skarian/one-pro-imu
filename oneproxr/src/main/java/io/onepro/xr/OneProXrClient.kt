@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import androidx.annotation.RequiresPermission
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.net.NetworkInterface
 import java.net.SocketTimeoutException
@@ -17,12 +18,6 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
-/**
- * Public runtime client for One Pro routing checks, diagnostics reads, and head-tracking streaming
- *
- * Host apps must declare `INTERNET` and `ACCESS_NETWORK_STATE` in their app manifest.
- * The library manifest is intentionally empty, so permissions are explicit in the consumer app.
- */
 class OneProXrClient(
     private val context: Context,
     private val endpoint: OneProXrEndpoint = OneProXrEndpoint()
@@ -33,11 +28,6 @@ class OneProXrClient(
         val addresses: List<String>
     )
 
-    /**
-     * Returns a routing snapshot for the configured host
-     *
-     * Use this to debug link-local routing before opening sockets.
-     */
     @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     suspend fun describeRouting(): RoutingSnapshot = withContext(Dispatchers.IO) {
         val interfaces = listInterfaces()
@@ -56,11 +46,6 @@ class OneProXrClient(
         )
     }
 
-    /**
-     * Attempts a short-lived connection to the control endpoint and reports transport metadata
-     *
-     * This is a diagnostic helper, not a persistent control session.
-     */
     @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     suspend fun connectControlChannel(
         connectTimeoutMs: Int = 1500,
@@ -116,12 +101,6 @@ class OneProXrClient(
         }
     }
 
-    /**
-     * Reads a bounded number of stream frames and returns decoded frame metadata plus rate estimates
-     *
-     * Use this for diagnostics or parser validation.
-     * For production tracking, use [streamHeadTracking].
-     */
     @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     suspend fun readSensorFrames(
         frameCount: Int = 4,
@@ -249,12 +228,161 @@ class OneProXrClient(
         }
     }
 
-    /**
-     * Starts a head-tracking event stream for the configured endpoint
-     *
-     * This is a cold [Flow], so each collection opens a fresh socket session.
-     * Cancel collection to stop streaming.
-     */
+    @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
+    suspend fun captureStreamBytes(
+        durationSeconds: Int = 45,
+        maxCaptureBytes: Int = 5 * 1024 * 1024,
+        connectTimeoutMs: Int = 1500,
+        readTimeoutMs: Int = 700,
+        readChunkBytes: Int = 4096
+    ): StreamCaptureResult = withContext(Dispatchers.IO) {
+        if (durationSeconds <= 0) {
+            return@withContext StreamCaptureResult(
+                success = false,
+                networkHandle = null,
+                interfaceName = null,
+                localSocket = null,
+                remoteSocket = null,
+                connectMs = 0,
+                durationMs = 0,
+                totalBytes = 0,
+                payload = ByteArray(0),
+                readStatus = "not-run",
+                error = "durationSeconds must be > 0"
+            )
+        }
+        if (maxCaptureBytes <= 0) {
+            return@withContext StreamCaptureResult(
+                success = false,
+                networkHandle = null,
+                interfaceName = null,
+                localSocket = null,
+                remoteSocket = null,
+                connectMs = 0,
+                durationMs = 0,
+                totalBytes = 0,
+                payload = ByteArray(0),
+                readStatus = "not-run",
+                error = "maxCaptureBytes must be > 0"
+            )
+        }
+        if (readChunkBytes <= 0) {
+            return@withContext StreamCaptureResult(
+                success = false,
+                networkHandle = null,
+                interfaceName = null,
+                localSocket = null,
+                remoteSocket = null,
+                connectMs = 0,
+                durationMs = 0,
+                totalBytes = 0,
+                payload = ByteArray(0),
+                readStatus = "not-run",
+                error = "readChunkBytes must be > 0"
+            )
+        }
+
+        val candidates = networkCandidatesForHost(endpoint.host)
+        val selected = preferredNetwork(endpoint.host, candidates)
+        if (selected == null) {
+            return@withContext StreamCaptureResult(
+                success = false,
+                networkHandle = null,
+                interfaceName = null,
+                localSocket = null,
+                remoteSocket = null,
+                connectMs = 0,
+                durationMs = 0,
+                totalBytes = 0,
+                payload = ByteArray(0),
+                readStatus = "not-run",
+                error = "No matching Android Network candidate for host ${endpoint.host}"
+            )
+        }
+
+        val startNanos = System.nanoTime()
+        return@withContext try {
+            selected.network.socketFactory.createSocket().use { socket ->
+                socket.soTimeout = readTimeoutMs
+                socket.connect(java.net.InetSocketAddress(endpoint.host, endpoint.streamPort), connectTimeoutMs)
+                val connectMs = (System.nanoTime() - startNanos) / 1_000_000
+                val localSocket = "${socket.localAddress.hostAddress}:${socket.localPort}"
+                val remoteSocket = "${socket.inetAddress.hostAddress}:${socket.port}"
+                val captureStartNanos = System.nanoTime()
+                val captureDeadlineNanos = captureStartNanos + durationSeconds.toLong() * 1_000_000_000L
+                val buffer = ByteArray(readChunkBytes)
+                val output = ByteArrayOutputStream(maxCaptureBytes.coerceAtMost(262_144))
+                var readStatus = "completed"
+
+                while (currentCoroutineContext().isActive) {
+                    if (System.nanoTime() >= captureDeadlineNanos) {
+                        readStatus = "duration-reached"
+                        break
+                    }
+                    if (output.size() >= maxCaptureBytes) {
+                        readStatus = "max-bytes-reached"
+                        break
+                    }
+
+                    val readCount = try {
+                        socket.getInputStream().read(buffer)
+                    } catch (_: SocketTimeoutException) {
+                        continue
+                    }
+
+                    if (readCount <= 0) {
+                        readStatus = "eof"
+                        break
+                    }
+
+                    val remaining = maxCaptureBytes - output.size()
+                    if (remaining <= 0) {
+                        readStatus = "max-bytes-reached"
+                        break
+                    }
+                    val bytesToWrite = readCount.coerceAtMost(remaining)
+                    output.write(buffer, 0, bytesToWrite)
+                    if (bytesToWrite < readCount) {
+                        readStatus = "max-bytes-reached"
+                        break
+                    }
+                }
+
+                val durationMs = (System.nanoTime() - captureStartNanos) / 1_000_000
+                val payload = output.toByteArray()
+                val success = payload.isNotEmpty()
+                StreamCaptureResult(
+                    success = success,
+                    networkHandle = selected.network.networkHandle,
+                    interfaceName = selected.interfaceName,
+                    localSocket = localSocket,
+                    remoteSocket = remoteSocket,
+                    connectMs = connectMs,
+                    durationMs = durationMs,
+                    totalBytes = payload.size,
+                    payload = payload,
+                    readStatus = readStatus,
+                    error = if (success) null else "No bytes captured ($readStatus)"
+                )
+            }
+        } catch (t: Throwable) {
+            val connectMs = (System.nanoTime() - startNanos) / 1_000_000
+            StreamCaptureResult(
+                success = false,
+                networkHandle = selected.network.networkHandle,
+                interfaceName = selected.interfaceName,
+                localSocket = null,
+                remoteSocket = "${endpoint.host}:${endpoint.streamPort}",
+                connectMs = connectMs,
+                durationMs = 0,
+                totalBytes = 0,
+                payload = ByteArray(0),
+                readStatus = "connect-failed",
+                error = "${t.javaClass.simpleName}:${t.message ?: "no-message"}"
+            )
+        }
+    }
+
     @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     fun streamHeadTracking(
         config: HeadTrackingStreamConfig = HeadTrackingStreamConfig()
@@ -285,7 +413,7 @@ class OneProXrClient(
 
         val controlChannel = config.controlChannel ?: HeadTrackingControlChannel()
         val diagnosticsTracker = HeadTrackingDiagnosticsTracker()
-        val framer = OneProStreamMessageParser.StreamFramer()
+        val framer = OneProReportMessageParser.StreamFramer()
         val tracker = OneProHeadTracker(
             OneProHeadTrackerConfig(
                 calibrationSampleTarget = config.calibrationSampleTarget,
@@ -348,12 +476,19 @@ class OneProXrClient(
 
                     val appendResult = framer.append(readBuffer.copyOf(readCount))
                     diagnosticsTracker.recordParserDelta(appendResult.diagnosticsDelta)
-                    if (appendResult.sensorSamples.isEmpty()) {
+                    if (appendResult.reports.isEmpty()) {
                         continue
                     }
 
-                    val captureMonotonicNanos = System.nanoTime()
-                    appendResult.sensorSamples.forEach { sensorSample ->
+                    appendResult.reports.forEach { report ->
+                        emit(HeadTrackingStreamEvent.ReportAvailable(report))
+
+                        if (report.reportType != OneProReportType.IMU) {
+                            return@forEach
+                        }
+
+                        val sensorSample = toSensorSample(report)
+
                         if (controlChannel.consumeRecalibrationRequest()) {
                             tracker.resetCalibration()
                             calibrationProgressReported = -1
@@ -394,9 +529,7 @@ class OneProXrClient(
 
                         val update = tracker.update(
                             sensorSample = sensorSample,
-                            timestampNanos = captureMonotonicNanos,
-                            fallbackDeltaSeconds = config.fallbackDeltaTimeSeconds,
-                            maxDeltaSeconds = config.maxDeltaTimeSeconds
+                            deviceTimestampNanos = report.hmdTimeNanosDevice
                         ) ?: return@forEach
 
                         trackingSamplesAfterCalibration += 1
@@ -408,8 +541,8 @@ class OneProXrClient(
                             pendingAutoZeroView = false
                         }
 
-                        val relative = tracker.getRelativeOrientation()
                         sampleIndex += 1
+                        val captureMonotonicNanos = System.nanoTime()
                         diagnosticsTracker.recordTrackingSample(captureMonotonicNanos)
 
                         emit(
@@ -418,9 +551,8 @@ class OneProXrClient(
                                     sampleIndex = sampleIndex,
                                     captureMonotonicNanos = captureMonotonicNanos,
                                     deltaTimeSeconds = update.deltaTimeSeconds,
-                                    sensorSample = sensorSample,
                                     absoluteOrientation = update.absoluteOrientation,
-                                    relativeOrientation = relative,
+                                    relativeOrientation = update.relativeOrientation,
                                     calibrationSampleCount = tracker.calibrationCount,
                                     calibrationTarget = tracker.calibrationTarget,
                                     isCalibrated = tracker.isCalibrated
@@ -455,6 +587,17 @@ class OneProXrClient(
             )
         }
     }.flowOn(Dispatchers.IO)
+
+    private fun toSensorSample(report: OneProReportMessage): OneProImuVectorSample {
+        return OneProImuVectorSample(
+            gx = report.gx,
+            gy = report.gy,
+            gz = report.gz,
+            ax = report.ax,
+            ay = report.ay,
+            az = report.az
+        )
+    }
 
     private fun shouldEmitCalibrationProgress(
         state: OneProCalibrationState,
