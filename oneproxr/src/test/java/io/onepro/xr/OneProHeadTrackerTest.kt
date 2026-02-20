@@ -38,13 +38,13 @@ class OneProHeadTrackerTest {
         tracker.calibrateGyroscope(sample())
 
         val firstUpdate = tracker.update(
-            sensorSample = sample(gy = 90.0f),
+            sensorSample = sample(gy = degreesPerSecondToRadiansPerSecond(90.0f)),
             deviceTimestampNanos = 1_000_000_000UL
         )
         assertNull(firstUpdate)
 
         val secondUpdate = tracker.update(
-            sensorSample = sample(gy = 90.0f),
+            sensorSample = sample(gy = degreesPerSecondToRadiansPerSecond(90.0f)),
             deviceTimestampNanos = 1_100_000_000UL
         )
         assertTrue(secondUpdate != null)
@@ -55,11 +55,59 @@ class OneProHeadTrackerTest {
         assertEquals(0.0f, zeroed.yaw, 0.0001f)
 
         tracker.update(
-            sensorSample = sample(gy = 90.0f),
+            sensorSample = sample(gy = degreesPerSecondToRadiansPerSecond(90.0f)),
             deviceTimestampNanos = 1_200_000_000UL
         )
         val relativeAfter = tracker.getRelativeOrientation()
         assertEquals(9.0f, relativeAfter.yaw, 0.0001f)
+    }
+
+    @Test
+    fun relativeOrientationIsPhysicalRecenteredDeltaWithoutGain() {
+        val tracker = createTracker(
+            calibrationSampleTarget = 1,
+            complementaryFilterAlpha = 1.0f,
+            biasConfig = neutralBiasConfig()
+        )
+
+        tracker.calibrateGyroscope(sample())
+
+        tracker.update(
+            sensorSample = sample(
+                gx = degreesPerSecondToRadiansPerSecond(20.0f),
+                gy = degreesPerSecondToRadiansPerSecond(30.0f),
+                gz = degreesPerSecondToRadiansPerSecond(-10.0f)
+            ),
+            deviceTimestampNanos = 1_000_000_000UL
+        )
+        val beforeZero = tracker.update(
+            sensorSample = sample(
+                gx = degreesPerSecondToRadiansPerSecond(20.0f),
+                gy = degreesPerSecondToRadiansPerSecond(30.0f),
+                gz = degreesPerSecondToRadiansPerSecond(-10.0f)
+            ),
+            deviceTimestampNanos = 1_100_000_000UL
+        )
+        assertTrue(beforeZero != null)
+
+        tracker.zeroView()
+        val afterZero = tracker.update(
+            sensorSample = sample(
+                gx = degreesPerSecondToRadiansPerSecond(20.0f),
+                gy = degreesPerSecondToRadiansPerSecond(30.0f),
+                gz = degreesPerSecondToRadiansPerSecond(-10.0f)
+            ),
+            deviceTimestampNanos = 1_200_000_000UL
+        )
+        assertTrue(afterZero != null)
+
+        val expectedPitch = wrapAngle(afterZero!!.absoluteOrientation.pitch - beforeZero!!.absoluteOrientation.pitch)
+        val expectedYaw = wrapAngle(afterZero.absoluteOrientation.yaw - beforeZero.absoluteOrientation.yaw)
+        val expectedRoll = wrapAngle(afterZero.absoluteOrientation.roll - beforeZero.absoluteOrientation.roll)
+
+        assertEquals(expectedPitch, afterZero.relativeOrientation.pitch, 0.0001f)
+        assertEquals(expectedYaw, afterZero.relativeOrientation.yaw, 0.0001f)
+        assertEquals(expectedRoll, afterZero.relativeOrientation.roll, 0.0001f)
     }
 
     @Test
@@ -72,13 +120,13 @@ class OneProHeadTrackerTest {
 
         tracker.calibrateGyroscope(sample())
         tracker.update(
-            sensorSample = sample(gy = 90.0f),
+            sensorSample = sample(gy = degreesPerSecondToRadiansPerSecond(90.0f)),
             deviceTimestampNanos = 1_000_000_000UL
         )
 
         try {
             tracker.update(
-                sensorSample = sample(gy = 90.0f),
+                sensorSample = sample(gy = degreesPerSecondToRadiansPerSecond(90.0f)),
                 deviceTimestampNanos = 1_000_000_000UL
             )
             throw AssertionError("expected non-monotonic timestamp failure")
@@ -300,12 +348,24 @@ class OneProHeadTrackerTest {
             config = OneProHeadTrackerConfig(
                 calibrationSampleTarget = calibrationSampleTarget,
                 complementaryFilterAlpha = complementaryFilterAlpha,
-                pitchScale = 1.0f,
-                yawScale = 1.0f,
-                rollScale = 1.0f,
                 biasConfig = biasConfig
             )
         )
+    }
+
+    private fun wrapAngle(value: Float): Float {
+        var angle = value
+        while (angle > 180.0f) {
+            angle -= 360.0f
+        }
+        while (angle < -180.0f) {
+            angle += 360.0f
+        }
+        return angle
+    }
+
+    private fun degreesPerSecondToRadiansPerSecond(value: Float): Float {
+        return Math.toRadians(value.toDouble()).toFloat()
     }
 
     private fun sample(

@@ -229,7 +229,11 @@ data class XrSensorSnapshot(
     val lastUpdatedSource: XrSensorUpdateSource
 )
 
-/** Current pose output plus the bias terms applied for this update. */
+/**
+ * Current physical pose output plus the bias terms applied for this update.
+ *
+ * `relativeOrientation` is recentered (`zeroView`) but not sensitivity-scaled.
+ */
 data class XrPoseSnapshot(
     val relativeOrientation: HeadOrientationDegrees,
     val absoluteOrientation: HeadOrientationDegrees,
@@ -331,9 +335,6 @@ internal data class HeadTrackingStreamConfig(
     val diagnosticsIntervalSamples: Int = 240,
     val calibrationSampleTarget: Int = 500,
     val complementaryFilterAlpha: Float = 0.96f,
-    val pitchScale: Float = 3.0f,
-    val yawScale: Float = 60.0f,
-    val rollScale: Float = 1.0f,
     val autoZeroViewOnStart: Boolean = true,
     val autoZeroViewAfterSamples: Int = 3,
     val controlChannel: HeadTrackingControlChannel? = null

@@ -6,7 +6,7 @@
 
 - simple runtime API for app lifecycle and tracking
 - typed sensor reports (`imu` + `magnetometer`)
-- orientation output ready for rendering (`poseData`)
+- physical orientation output (`poseData`) with zero-view recentering
 - config-driven tracker bias correction (factory + runtime residual)
 - direct control API for scene/input/brightness/dimmer
 - optional diagnostics and raw report stream for advanced usage
@@ -216,6 +216,8 @@ Typed config coverage includes:
 - `gyro_corrected = gyro_raw - factory_temp_interpolated_bias - runtime_residual_bias`
 - `accel_corrected = accel_raw - factory_accel_bias`
 - In the `poseData` path, the compatibility accel axis remap and factory accel bias remap are applied consistently, so correction is equivalent to raw-frame subtraction before remap
+- Gyroscope and gyro-bias terms are treated as rad/s; pose integration converts to degrees and emits orientation in degrees
+- `relativeOrientation` is the physical recentered delta from `zeroView` (no library-applied gain)
 
 You can observe bias activation/failure in real time:
 
@@ -262,7 +264,9 @@ Advanced API (`client.advanced`):
 - `start()` now fails fast if tracker bias prerequisites cannot be loaded from config (`biasState=Error`)
 - tracking time integration uses device timestamp (`hmd_time_nanos_device`) with fail-fast monotonic checks
 - `sensorData` is raw protocol field order
-- `poseData` uses compatibility accel mapping to preserve baseline demo behavior, with factory accel bias remapped consistently so correction remains raw-frame equivalent
+- `poseData` uses compatibility accel mapping with factory accel bias remapped consistently so correction remains raw-frame equivalent
+- `poseData.absoluteOrientation` and `poseData.relativeOrientation` are physical angles in degrees; relative orientation is recentered but not scaled
+- `poseData` gyroscope integration expects device `gx/gy/gz` and gyro bias terms in rad/s
 - `getConfig()` validates schema and throws typed config errors (`parse_error` or `schema_validation_error`) for invalid payloads
 
 ## Control protocol contract

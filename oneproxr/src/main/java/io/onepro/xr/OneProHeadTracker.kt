@@ -53,9 +53,6 @@ internal data class OneProTrackerBiasConfig(
 internal data class OneProHeadTrackerConfig(
     val calibrationSampleTarget: Int,
     val complementaryFilterAlpha: Float,
-    val pitchScale: Float,
-    val yawScale: Float,
-    val rollScale: Float,
     val biasConfig: OneProTrackerBiasConfig
 )
 
@@ -161,9 +158,9 @@ internal class OneProHeadTracker(
 
     fun getRelativeOrientation(): HeadOrientationDegrees {
         return HeadOrientationDegrees(
-            pitch = wrapAngle((pitch - zeroPitch) * config.pitchScale),
-            yaw = wrapAngle((yaw - zeroYaw) * config.yawScale),
-            roll = wrapAngle((roll - zeroRoll) * config.rollScale)
+            pitch = wrapAngle(pitch - zeroPitch),
+            yaw = wrapAngle(yaw - zeroYaw),
+            roll = wrapAngle(roll - zeroRoll)
         )
     }
 
@@ -201,9 +198,9 @@ internal class OneProHeadTracker(
         val gyroY = sensorSample.gy - factoryGyroBias.y - gyroBiasY
         val gyroZ = sensorSample.gz - factoryGyroBias.z - gyroBiasZ
 
-        val pitchGyro = pitch + gyroX * deltaTimeSeconds
-        val yawGyro = yaw + gyroY * deltaTimeSeconds
-        val rollGyro = roll + gyroZ * deltaTimeSeconds
+        val pitchGyro = pitch + gyroX * RAD_PER_SEC_TO_DEG_PER_SEC * deltaTimeSeconds
+        val yawGyro = yaw + gyroY * RAD_PER_SEC_TO_DEG_PER_SEC * deltaTimeSeconds
+        val rollGyro = roll + gyroZ * RAD_PER_SEC_TO_DEG_PER_SEC * deltaTimeSeconds
 
         val accelX = sensorSample.ax - factoryAccelBias.x
         val accelY = sensorSample.ay - factoryAccelBias.y
@@ -285,6 +282,8 @@ internal class OneProHeadTracker(
         return deltaSeconds.toFloat()
     }
 }
+
+private const val RAD_PER_SEC_TO_DEG_PER_SEC = 57.29578f
 
 private fun XrVector3d.toVector3f(): Vector3f {
     return Vector3f(x.toFloat(), y.toFloat(), z.toFloat())

@@ -686,9 +686,6 @@ class OneProXrClient(
             OneProHeadTrackerConfig(
                 calibrationSampleTarget = config.calibrationSampleTarget,
                 complementaryFilterAlpha = config.complementaryFilterAlpha,
-                pitchScale = config.pitchScale,
-                yawScale = config.yawScale,
-                rollScale = config.rollScale,
                 biasConfig = trackerBiasConfig
             )
         )
