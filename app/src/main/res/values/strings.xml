@@ -34,6 +34,9 @@
     <string name="action_recalibrate">Recalibrate</string>
     <string name="action_sensitivity_down">Sens -</string>
     <string name="action_sensitivity_up">Sens +</string>
+    <string name="label_pose_mode">PoseData Mode</string>
+    <string name="action_pose_mode_raw">Raw IMU</string>
+    <string name="action_pose_mode_smooth">Smooth IMU</string>
     <string name="controls_section_queries">Queries</string>
     <string name="controls_section_scene">Scene Mode</string>
     <string name="controls_section_input">Display Input Mode</string>

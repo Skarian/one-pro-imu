@@ -10,6 +10,7 @@ import io.onepro.xr.HeadTrackingStreamDiagnostics
 import io.onepro.xr.OneProXrClient
 import io.onepro.xr.OneProXrEndpoint
 import io.onepro.xr.XrBiasState
+import io.onepro.xr.XrPoseDataMode
 import io.onepro.xr.XrPoseSnapshot
 import io.onepro.xr.XrSensorSnapshot
 import io.onepro.xr.XrSensorUpdateSource
@@ -39,6 +40,7 @@ class SensorDemoActivity : AppCompatActivity() {
     private var logsVisible = false
     private var calibrationComplete = false
     private var cameraSensitivity = 1.0f
+    private var selectedPoseDataMode = XrPoseDataMode.RAW_IMU
     private var client: OneProXrClient? = null
     private var latestDiagnostics: HeadTrackingStreamDiagnostics? = null
     private var latestSensorSnapshot: XrSensorSnapshot? = null
@@ -64,6 +66,7 @@ class SensorDemoActivity : AppCompatActivity() {
         binding.buttonSensitivityDown.setOnClickListener { adjustSensitivity(-0.1f) }
         binding.buttonSensitivityUp.setOnClickListener { adjustSensitivity(0.1f) }
 
+        initializePoseModeControls()
         setLogsVisible(false)
         setRunningState(false)
         renderSensitivity()
@@ -101,6 +104,7 @@ class SensorDemoActivity : AppCompatActivity() {
 
         val endpoint = buildEndpoint(host, ports)
         val xrClient = OneProXrClient(applicationContext, endpoint)
+        xrClient.setPoseDataMode(selectedPoseDataMode)
         client = xrClient
 
         latestDiagnostics = null
@@ -121,7 +125,7 @@ class SensorDemoActivity : AppCompatActivity() {
         setRunningState(true)
 
         appendLog(
-            "=== test start ${nowIso()} host=${endpoint.host} control=${endpoint.controlPort} stream=${endpoint.streamPort} sensitivity=${formatSensitivity()} ==="
+            "=== test start ${nowIso()} host=${endpoint.host} control=${endpoint.controlPort} stream=${endpoint.streamPort} sensitivity=${formatSensitivity()} poseMode=${selectedPoseDataMode.name} ==="
         )
 
         attachClientCollectors(xrClient)
@@ -343,6 +347,29 @@ class SensorDemoActivity : AppCompatActivity() {
         binding.inputHost.isEnabled = !running
         binding.inputPorts.isEnabled = !running
         binding.buttonZeroView.isEnabled = running && calibrationComplete
+    }
+
+    private fun initializePoseModeControls() {
+        binding.radioPoseModeRaw.isChecked = true
+        binding.radioGroupPoseMode.setOnCheckedChangeListener { _, checkedId ->
+            val selectedMode = if (checkedId == binding.radioPoseModeSmooth.id) {
+                XrPoseDataMode.SMOOTH_IMU
+            } else {
+                XrPoseDataMode.RAW_IMU
+            }
+            if (selectedMode == selectedPoseDataMode) {
+                return@setOnCheckedChangeListener
+            }
+            selectedPoseDataMode = selectedMode
+            appendLog("poseData mode selected=${selectedMode.name}")
+            val xrClient = client
+            if (xrClient == null) {
+                appendLog("poseData mode will apply on next start")
+                return@setOnCheckedChangeListener
+            }
+            xrClient.setPoseDataMode(selectedMode)
+            appendLog("poseData mode applied=${selectedMode.name}")
+        }
     }
 
     private fun adjustSensitivity(delta: Float) {

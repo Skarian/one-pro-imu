@@ -230,9 +230,21 @@ data class XrSensorSnapshot(
 )
 
 /**
+ * Runtime pose output mode for `poseData`.
+ *
+ * `RAW_IMU` publishes tracker output as-is.
+ * `SMOOTH_IMU` applies additional smoothing to `relativeOrientation`.
+ */
+enum class XrPoseDataMode {
+    RAW_IMU,
+    SMOOTH_IMU
+}
+
+/**
  * Current physical pose output plus the bias terms applied for this update.
  *
  * `relativeOrientation` is recentered (`zeroView`) but not sensitivity-scaled.
+ * It may be additionally smoothed when `poseDataMode` is `SMOOTH_IMU`.
  */
 data class XrPoseSnapshot(
     val relativeOrientation: HeadOrientationDegrees,

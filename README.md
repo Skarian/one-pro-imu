@@ -35,6 +35,7 @@ Helpful methods:
 - `start() / stop()`
 - `sessionState / biasState`
 - `poseData`
+- `poseDataMode / setPoseDataMode()`
 - `sensorData`
 - `zeroView() / recalibrate()`
 - `setSceneMode() / setDisplayInputMode()`
@@ -67,6 +68,8 @@ adb shell am start -n io.onepro.xrprobe/.HomeActivity
 6. If tracking drifts later, tap `Recalibrate` and repeat the still-on-surface step
 7. Read the telemetry panel above the 3D view:
    it shows parsed report counts (`imu`, `mag`, `rejected`, `dropped`), latest report metadata, and current orientation output
+8. Choose `PoseData Mode`:
+   use `Raw IMU` for baseline output or `Smooth IMU` for a smoothed `relativeOrientation` camera path
 
 ## Notes on Android implementation
 
@@ -75,6 +78,7 @@ adb shell am start -n io.onepro.xrprobe/.HomeActivity
 - Parses full report payload parity fields (`device_id`, `hmd_time_nanos_device`, `report_type`, IMU vectors, magnetometer vectors, temperature, imu_id, frame_id)
 - Keeps raw vectors in protocol field order in `sensorData`; `poseData` uses compatibility accel mapping with factory accel bias remapped equivalently so correction matches raw-frame subtraction before remap
 - Publishes physical orientation in `poseData`: `absoluteOrientation` is world-frame estimator output and `relativeOrientation` is zero-view-recentered delta (no sensitivity gain)
+- Supports two `poseData` modes: `RAW_IMU` (baseline output) and `SMOOTH_IMU` (applies smoothing to `relativeOrientation`; `absoluteOrientation` remains raw)
 - Uses device timestamp (`hmd_time_nanos_device`) for tracking integration with fail-fast monotonicity checks
 - Treats device gyroscope and gyro bias values as rad/s, converts to deg/s internally for pose integration, and emits pose angles in degrees
 - Uses config-driven bias correction (`factory temp-interpolated gyro + runtime residual gyro + factory accel`) with explicit `biasState` activation/error status

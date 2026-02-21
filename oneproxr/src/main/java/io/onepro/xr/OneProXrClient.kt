@@ -8,6 +8,7 @@ import androidx.annotation.RequiresPermission
 import java.net.NetworkInterface
 import java.net.SocketTimeoutException
 import java.util.Collections
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -58,11 +59,14 @@ class OneProXrClient(
     private var activeControlEventJob: Job? = null
     private var latestImuSample: XrImuSample? = null
     private var latestMagSample: XrMagSample? = null
+    private val poseSmoother = OneProPoseSmoother()
+    private val poseSmootherNeedsPrime = AtomicBoolean(false)
 
     private val _sessionState = MutableStateFlow<XrSessionState>(XrSessionState.Idle)
     private val _biasState = MutableStateFlow<XrBiasState>(XrBiasState.Inactive)
     private val _sensorData = MutableStateFlow<XrSensorSnapshot?>(null)
     private val _poseData = MutableStateFlow<XrPoseSnapshot?>(null)
+    private val _poseDataMode = MutableStateFlow(XrPoseDataMode.RAW_IMU)
     private val _advancedDiagnostics = MutableStateFlow<HeadTrackingStreamDiagnostics?>(null)
     private val _advancedReports = MutableSharedFlow<OneProReportMessage>(extraBufferCapacity = 256)
     private val _advancedControlEvents = MutableSharedFlow<XrControlEvent>(extraBufferCapacity = 128)
@@ -93,10 +97,40 @@ class OneProXrClient(
     val poseData: StateFlow<XrPoseSnapshot?>
         get() = _poseData.asStateFlow()
 
+    /**
+     * Controls how `poseData` is published.
+     *
+     * `RAW_IMU` keeps tracker pose output unchanged.
+     * `SMOOTH_IMU` applies smoothing to `relativeOrientation` only.
+     */
+    val poseDataMode: StateFlow<XrPoseDataMode>
+        get() = _poseDataMode.asStateFlow()
+
     val advanced: OneProXrAdvancedApi
         get() = advancedApi
 
     private val startupTimeoutMs = 3500L
+
+    fun setPoseDataMode(mode: XrPoseDataMode) {
+        val previous = _poseDataMode.value
+        if (previous == mode) {
+            return
+        }
+
+        _poseDataMode.value = mode
+        poseSmoother.reset()
+        if (mode == XrPoseDataMode.SMOOTH_IMU) {
+            val latestPose = _poseData.value
+            if (latestPose != null) {
+                poseSmoother.prime(latestPose.relativeOrientation)
+                poseSmootherNeedsPrime.set(false)
+            } else {
+                poseSmootherNeedsPrime.set(true)
+            }
+        } else {
+            poseSmootherNeedsPrime.set(false)
+        }
+    }
 
     @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     suspend fun describeRouting(): RoutingSnapshot = withContext(Dispatchers.IO) {
@@ -143,6 +177,7 @@ class OneProXrClient(
         }
         staleControlHandles.controlEventJob?.cancel()
         staleControlHandles.controlSession?.close()
+        resetPoseSmoothingState()
 
         val startupSignal = CompletableDeferred<XrConnectionInfo>()
         val controlChannel = HeadTrackingControlChannel()
@@ -319,6 +354,7 @@ class OneProXrClient(
         } else {
             handles.streamJob?.cancel()
         }
+        resetPoseSmoothingState()
         if (resetBiasState) {
             _biasState.value = XrBiasState.Inactive
         }
@@ -416,7 +452,7 @@ class OneProXrClient(
             }
 
             is HeadTrackingStreamEvent.TrackingSampleAvailable -> {
-                _poseData.value = XrPoseSnapshot(
+                val rawPoseSnapshot = XrPoseSnapshot(
                     relativeOrientation = event.sample.relativeOrientation,
                     absoluteOrientation = event.sample.absoluteOrientation,
                     isCalibrated = event.sample.isCalibrated,
@@ -428,6 +464,7 @@ class OneProXrClient(
                     runtimeResidualGyroBias = event.sample.runtimeResidualGyroBias,
                     factoryAccelBias = event.sample.factoryAccelBias
                 )
+                _poseData.value = applyPoseDataMode(rawPoseSnapshot)
                 val info = runtimeMutex.withLock { activeConnectionInfo }
                 if (info != null && event.sample.isCalibrated) {
                     _sessionState.value = XrSessionState.Streaming(info)
@@ -457,6 +494,28 @@ class OneProXrClient(
                 cancelRuntimeSession(resetBiasState = false)
             }
         }
+    }
+
+    private fun applyPoseDataMode(rawPoseSnapshot: XrPoseSnapshot): XrPoseSnapshot {
+        return when (_poseDataMode.value) {
+            XrPoseDataMode.RAW_IMU -> rawPoseSnapshot
+
+            XrPoseDataMode.SMOOTH_IMU -> {
+                if (poseSmootherNeedsPrime.getAndSet(false)) {
+                    poseSmoother.prime(rawPoseSnapshot.relativeOrientation)
+                }
+                val smoothedRelative = poseSmoother.smooth(
+                    orientation = rawPoseSnapshot.relativeOrientation,
+                    deltaTimeSeconds = rawPoseSnapshot.deltaTimeSeconds
+                )
+                rawPoseSnapshot.copy(relativeOrientation = smoothedRelative)
+            }
+        }
+    }
+
+    private fun resetPoseSmoothingState() {
+        poseSmoother.reset()
+        poseSmootherNeedsPrime.set(_poseDataMode.value == XrPoseDataMode.SMOOTH_IMU)
     }
 
     private fun handleRuntimeFailure(
@@ -757,6 +816,7 @@ class OneProXrClient(
 
                         if (controlChannel.consumeRecalibrationRequest()) {
                             tracker.resetCalibration()
+                            resetPoseSmoothingState()
                             calibrationProgressReported = -1
                             trackingSamplesAfterCalibration = 0L
                             emit(
@@ -791,6 +851,7 @@ class OneProXrClient(
 
                         if (controlChannel.consumeZeroViewRequest()) {
                             tracker.zeroView()
+                            resetPoseSmoothingState()
                         }
 
                         val update = tracker.update(
@@ -804,6 +865,7 @@ class OneProXrClient(
                             trackingSamplesAfterCalibration >= config.autoZeroViewAfterSamples.coerceAtLeast(1).toLong()
                         ) {
                             tracker.zeroView()
+                            resetPoseSmoothingState()
                             pendingAutoZeroView = false
                         }
 

@@ -122,6 +122,37 @@
     </LinearLayout>
 
     <TextView
+        android:id="@+id/labelPoseMode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/label_pose_mode"
+        android:textAppearance="?attr/textAppearanceBodyMedium" />
+
+    <RadioGroup
+        android:id="@+id/radioGroupPoseMode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:orientation="horizontal">
+
+        <RadioButton
+            android:id="@+id/radioPoseModeRaw"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:checked="true"
+            android:text="@string/action_pose_mode_raw" />
+
+        <RadioButton
+            android:id="@+id/radioPoseModeSmooth"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/action_pose_mode_smooth" />
+    </RadioGroup>
+
+    <TextView
         android:id="@+id/textStatus"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

@@ -63,6 +63,7 @@ import androidx.annotation.RequiresPermission
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import io.onepro.xr.OneProXrClient
+import io.onepro.xr.XrPoseDataMode
 import io.onepro.xr.XrPoseSnapshot
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.Job
@@ -83,6 +84,7 @@ class TrackingActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 client.start()
+                client.setPoseDataMode(XrPoseDataMode.RAW_IMU)
                 poseJob?.cancel()
                 poseJob = launch {
                     client.poseData.collect { pose ->
@@ -120,6 +122,19 @@ class TrackingActivity : AppCompatActivity() {
         Log.d("xr", "pitch=${r.pitch} yaw=${r.yaw} roll=${r.roll}")
     }
 }
+```
+
+## PoseData modes
+
+`poseData` mode is runtime-selectable:
+
+- `XrPoseDataMode.RAW_IMU`: publishes tracker pose output without extra smoothing.
+- `XrPoseDataMode.SMOOTH_IMU`: applies smoothing to `relativeOrientation` only.
+
+`absoluteOrientation` remains raw in both modes. `sensorData` is always raw.
+
+```kotlin
+client.setPoseDataMode(XrPoseDataMode.SMOOTH_IMU)
 ```
 
 ## If you need raw IMU/MAG data
@@ -240,6 +255,8 @@ Simple API (`OneProXrClient`):
 - `biasState`
 - `sensorData`
 - `poseData`
+- `poseDataMode`
+- `setPoseDataMode(mode)`
 - `zeroView()`
 - `recalibrate()`
 - `setSceneMode(mode)`
@@ -265,6 +282,7 @@ Advanced API (`client.advanced`):
 - tracking time integration uses device timestamp (`hmd_time_nanos_device`) with fail-fast monotonic checks
 - `sensorData` is raw protocol field order
 - `poseData` uses compatibility accel mapping with factory accel bias remapped consistently so correction remains raw-frame equivalent
+- `poseDataMode=SMOOTH_IMU` smooths `relativeOrientation`; `absoluteOrientation` remains unsmoothed raw tracker output
 - `poseData.absoluteOrientation` and `poseData.relativeOrientation` are physical angles in degrees; relative orientation is recentered but not scaled
 - `poseData` gyroscope integration expects device `gx/gy/gz` and gyro bias terms in rad/s
 - `getConfig()` validates schema and throws typed config errors (`parse_error` or `schema_validation_error`) for invalid payloads
